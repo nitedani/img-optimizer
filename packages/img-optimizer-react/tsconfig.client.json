@@ -1,0 +1,26 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "./src/client",
+    "./src/index.ts"
+  ],
+  "compilerOptions": {
+    "outDir": "lib/",
+    "module": "esnext",
+    "target": "ESNext",
+    "lib": [
+      "ESNext",
+      "DOM"
+    ],
+    "jsx": "react-jsx",
+    "declaration": true,
+    "moduleResolution": "node",
+    "noImplicitThis": true,
+    "skipLibCheck": true,
+    "noImplicitAny": false,
+    "strictNullChecks": true,
+    "suppressImplicitAnyIndexErrors": true,
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true
+  }
+}

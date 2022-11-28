@@ -1,0 +1,20 @@
+{
+    "compilerOptions": {
+        "rootDir": "./src",
+        "baseUrl": "./src",
+    },
+    "files": [],
+    "exclude": [
+        "node_modules",
+        "lib",
+        "examples",
+    ],
+    "references": [
+        {
+            "path": "./tsconfig.server.json"
+        },
+        {
+            "path": "./tsconfig.client.json"
+        }
+    ]
+}
