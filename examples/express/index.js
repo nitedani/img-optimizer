@@ -1,13 +1,13 @@
 import express from "express";
 import { createSrcSet } from "@nitedani/img-optimizer";
 import { createOptimizer } from "@nitedani/img-optimizer/server";
-import { readFileSync } from "fs";
+import { readFile } from "fs/promises";
 
 const app = express();
 
 const optimize = createOptimizer({
   loadStaticAsset: (src) => {
-    return readFileSync(`public${src}`);
+    return readFile(`public${src}`);
   },
 });
 
