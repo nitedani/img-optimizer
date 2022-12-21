@@ -5,12 +5,6 @@ import { readFile } from "fs/promises";
 
 const app = express();
 
-const optimize = createOptimizer({
-  loadStaticAsset: (src) => {
-    return readFile(`public${src}`);
-  },
-});
-
 app.get("/", (req, res) => {
   const srcset = createSrcSet("/test-8k.jpg");
   res.send(`
@@ -28,6 +22,12 @@ app.get("/", (req, res) => {
         </body>
     </html>
     `);
+});
+
+const optimize = createOptimizer({
+  loadStaticAsset: (src) => {
+    return readFile(`public${src}`);
+  },
 });
 app.get("/_image", async (req, res, next) => {
   const result = await optimize({
