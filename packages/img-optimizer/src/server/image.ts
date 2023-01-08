@@ -96,19 +96,19 @@ export class OptimizedImage {
 
     const data = await img.toBuffer();
 
-    if (newSize < this.originalSize) {
-      console.log(
-        `generated size ${this.originalSize} -> ${newSize}, ${(
-          this.originalData.byteLength / 1024
-        ).toFixed()}kb -> ${(data.byteLength / 1024).toFixed()}kb`
-      );
-    } else {
-      console.log(
-        `compressed original size ${this.originalSize}, ${(
-          this.originalData.byteLength / 1024
-        ).toFixed()}kb -> ${(data.byteLength / 1024).toFixed()}kb`
-      );
-    }
+    // if (newSize < this.originalSize) {
+    //   console.debug(
+    //     `generated size ${this.originalSize} -> ${newSize}, ${(
+    //       this.originalData.byteLength / 1024
+    //     ).toFixed()}kb -> ${(data.byteLength / 1024).toFixed()}kb`
+    //   );
+    // } else {
+    //   console.debug(
+    //     `compressed original size ${this.originalSize}, ${(
+    //       this.originalData.byteLength / 1024
+    //     ).toFixed()}kb -> ${(data.byteLength / 1024).toFixed()}kb`
+    //   );
+    // }
 
     switch (format) {
       case 'avif':
@@ -127,9 +127,11 @@ export class OptimizedImage {
   initialize({
     headers,
     loadStaticAsset,
+    port,
   }: {
     headers: Record<string, string>;
     loadStaticAsset?: StaticAssetLoader;
+    port?: number;
   }) {
     if (this.initializingPromise) {
       return this.initializingPromise;
@@ -139,6 +141,7 @@ export class OptimizedImage {
         src: this.src,
         headers,
         loadStaticAsset,
+        port,
       });
       this.originalData = buffer;
       this.sharpInstance = sharp(buffer);

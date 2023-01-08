@@ -1,10 +1,11 @@
 import React from "react";
 import image from "./test-8k.jpg";
-import { Image } from "@nitedani/img-optimizer-react";
+import { Image } from "img-optimizer-react";
 
 export function Page() {
   return (
     <>
+    asd
       <div
         style={{
           position: "relative",

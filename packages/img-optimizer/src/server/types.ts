@@ -20,7 +20,7 @@ export interface OptimizerResult {
 }
 
 export interface OptimizerInput {
-  url: string;
+  url: string | URL;
   headers?: Record<string, string | string[] | undefined> | Headers;
   loadStaticAsset?: StaticAssetLoader;
 }

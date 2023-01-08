@@ -9,6 +9,43 @@ import {
 } from './types.js';
 import { parseHeaders } from './utils.js';
 
+const parsePort = (port: string | number | undefined) => {
+  if (typeof port === 'string') {
+    try {
+      return parseInt(port, 10);
+    } catch (error) {
+      return undefined;
+    }
+  }
+  return port;
+};
+
+const parseUrl = (url: string | URL) => {
+  if (url instanceof URL) {
+    return { url, port: parsePort(url.port || process.env.PORT) };
+  }
+
+  let port: number | undefined = undefined;
+  const portMatch = /^[A-Z]+?:\/\/[A-Z\d\.-]{2,}\.[A-Z]{2,}:(\d{2,5})?/i.exec(
+    url
+  );
+
+  if (portMatch?.length === 2) {
+    port = parsePort(portMatch[1]);
+  }
+
+  port ||= parsePort(process.env.PORT);
+
+  return {
+    url: new URL(
+      'http://localhost' + port
+        ? `:${port}`
+        : '' + url.substring(url.indexOf('/img-optimizer'))
+    ),
+    port,
+  };
+};
+
 export const createOptimizer = (optimizerOptions?: OptimizerOptions) => {
   const _optimizerOptions = defu(optimizerOptions, {
     sizes: [360, 640, 1024, 1280, 1600, 1920, 2560, 3840],
@@ -31,8 +68,8 @@ export const createOptimizer = (optimizerOptions?: OptimizerOptions) => {
   const optimize = async (
     optimizeOptions: OptimizerInput
   ): Promise<OptimizerResult> => {
-    const parsed = new URL('http://localhost' + optimizeOptions.url);
-    const searchParams = parsed.searchParams;
+    const { url, port } = parseUrl(optimizeOptions.url);
+    const searchParams = url.searchParams;
     const src = searchParams.get('src');
     const sizeStr = searchParams.get('size');
     const headers = optimizeOptions.headers
@@ -64,6 +101,7 @@ export const createOptimizer = (optimizerOptions?: OptimizerOptions) => {
           loadStaticAsset:
             optimizeOptions.loadStaticAsset ??
             _optimizerOptions.loadStaticAsset,
+          port,
         });
       }
 

@@ -1,4 +1,4 @@
-import { createSrcSet, parseSafeNumber } from '@nitedani/img-optimizer';
+import { createSrcSet, parseSafeNumber } from 'img-optimizer';
 import { CSSProperties, useEffect, useMemo, useRef } from 'react';
 import { ImageProps } from './types.js';
 

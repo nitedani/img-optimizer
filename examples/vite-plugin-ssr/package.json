@@ -5,12 +5,12 @@
   "scripts": {
     "dev": "vite",
     "build": "vavite",
-    "start": "node dist/server"
+    "start": "cross-env NODE_ENV=production node dist/server"
   },
   "dependencies": {
     "@nitedani/vite-plugin-ssr-adapter-express": "^0.0.5",
-    "@nitedani/img-optimizer": "*",
-    "@nitedani/img-optimizer-react": "*",
+    "img-optimizer": "*",
+    "img-optimizer-react": "*",
     "@types/express": "^4.17.14",
     "@types/node": "^18.11.14",
     "@types/react": "^18.0.26",

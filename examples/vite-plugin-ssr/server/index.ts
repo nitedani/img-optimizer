@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 import { vpsMiddleware } from "@nitedani/vite-plugin-ssr-adapter-express";
-import { createOptimizer } from "@nitedani/img-optimizer/server";
+import { createOptimizer } from "img-optimizer/server";
 import express from "express";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
@@ -15,12 +15,13 @@ startServer();
 async function startServer() {
   const app = express();
 
+  const root = import.meta.env.PROD ? join(__dirname, "..", "client") : cwd();
   const optimize = createOptimizer({
     loadStaticAsset: (src) => {
-      return readFile(join(cwd(), src));
+      return readFile(join(root, src));
     },
   });
-  app.get("/_image", async (req, res, next) => {
+  app.get("/img-optimizer", async (req, res, next) => {
     const result = await optimize({
       url: req.url,
       headers: req.headers,
@@ -31,7 +32,7 @@ async function startServer() {
 
   app.use(
     vpsMiddleware({
-      root: join(__dirname, "client"),
+      root,
     })
   );
 

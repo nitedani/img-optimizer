@@ -12,7 +12,7 @@
   "author": "Dániel Horváth",
   "license": "ISC",
   "dependencies": {
-    "@nitedani/img-optimizer": "*",
+    "img-optimizer": "*",
     "express": "^4.18.2"
   },
   "devDependencies": {

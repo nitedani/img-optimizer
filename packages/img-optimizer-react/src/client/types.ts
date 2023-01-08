@@ -1,4 +1,4 @@
-import { SafeNumber } from '@nitedani/img-optimizer';
+import { SafeNumber } from 'img-optimizer';
 declare const VALID_LOADING_VALUES: readonly ['lazy', 'eager', undefined];
 declare type LoadingValue = typeof VALID_LOADING_VALUES[number];
 export declare type ImageProps = Omit<

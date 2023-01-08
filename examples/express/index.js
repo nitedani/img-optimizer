@@ -1,6 +1,6 @@
 import express from "express";
-import { createSrcSet } from "@nitedani/img-optimizer";
-import { createOptimizer } from "@nitedani/img-optimizer/server";
+import { createSrcSet } from "img-optimizer";
+import { createOptimizer } from "img-optimizer/server";
 import { readFile } from "fs/promises";
 
 const app = express();
@@ -29,7 +29,7 @@ const optimize = createOptimizer({
     return readFile(`public${src}`);
   },
 });
-app.get("/_image", async (req, res, next) => {
+app.get("/img-optimizer", async (req, res, next) => {
   const result = await optimize({
     url: req.url,
     headers: req.headers,

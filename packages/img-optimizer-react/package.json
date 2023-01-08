@@ -1,5 +1,5 @@
 {
-  "name": "@nitedani/img-optimizer-react",
+  "name": "img-optimizer-react",
   "version": "0.0.1",
   "license": "MIT",
   "type": "module",
@@ -36,7 +36,7 @@
     "lib"
   ],
   "dependencies": {
-    "@nitedani/img-optimizer": "*"
+    "img-optimizer": "*"
   },
   "prettier": {
     "singleQuote": true,

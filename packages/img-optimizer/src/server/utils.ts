@@ -18,15 +18,21 @@ export const loadBuffer = async ({
   src,
   headers,
   loadStaticAsset,
+  port,
 }: {
   src: string;
   headers?: HeadersInit;
   loadStaticAsset?: StaticAssetLoader;
+  port?: number;
 }) => {
   const isLocal = src.startsWith('/');
 
   if (isLocal) {
     if (!loadStaticAsset) {
+      if (port) {
+        const res = await fetch('http://localhost:' + port + src);
+        return Buffer.from(await res.arrayBuffer());
+      }
       throw new Error('loadStaticAsset is required for local files');
     }
 
