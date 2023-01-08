@@ -28,7 +28,7 @@ export const makeUrl = (
   size: SafeNumber,
   quality?: SafeNumber
 ) => {
-  let url = `/img-optimizer?src=${src}&size=${size}`;
+  let url = `/img-optimizer?src=${encodeURIComponent(src)}&size=${size}`;
   if (quality) {
     url += `&quality=${quality}`;
   }

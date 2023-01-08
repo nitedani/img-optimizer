@@ -37,6 +37,7 @@
   ],
   "dependencies": {
     "defu": "^6.1.0",
+    "got": "^12.5.3",
     "sharp": "^0.31.2"
   },
   "prettier": {

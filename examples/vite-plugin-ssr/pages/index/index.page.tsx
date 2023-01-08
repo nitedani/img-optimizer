@@ -1,11 +1,9 @@
-import React from "react";
 import image from "./test-8k.jpg";
 import { Image } from "img-optimizer-react";
 
 export function Page() {
   return (
     <>
-    asd
       <div
         style={{
           position: "relative",
@@ -23,7 +21,7 @@ export function Page() {
         />
       </div>
       <Image
-        src={image}
+        src="https://pbs.twimg.com/media/ELSHvYBUUAAH4j1.jpg:large"
         width="600"
         height="600"
         alt=""

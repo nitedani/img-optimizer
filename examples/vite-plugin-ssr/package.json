@@ -2,6 +2,7 @@
   "name": "example-vite-plugin-ssr",
   "type": "module",
   "private": true,
+  "version": "0.0.1",
   "scripts": {
     "dev": "vite",
     "build": "vavite",

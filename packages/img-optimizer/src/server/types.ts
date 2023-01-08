@@ -11,6 +11,7 @@ export interface OptimizerOptions {
   formats?: Format[];
   cacheSizeMb?: number;
   sizes?: number[];
+  domains?: string[] | true;
 }
 
 export interface OptimizerResult {

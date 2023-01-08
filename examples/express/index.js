@@ -1,12 +1,10 @@
 import express from "express";
 import { createSrcSet } from "img-optimizer";
 import { createOptimizer } from "img-optimizer/server";
-import { readFile } from "fs/promises";
 
 const app = express();
 
 app.get("/", (req, res) => {
-  const srcset = createSrcSet("/test-8k.jpg");
   res.send(`
     <html>
         <style>
@@ -18,17 +16,19 @@ app.get("/", (req, res) => {
             <title>Img Optimizer</title>
         </head>
         <body>
-            <img srcset="${srcset}" />
+            <img srcset="${createSrcSet("/test-8k.jpg")}" />
+            <img srcset="${createSrcSet(
+              "https://pbs.twimg.com/media/ELSHvYBUUAAH4j1.jpg:large"
+            )}" />
         </body>
     </html>
     `);
 });
 
 const optimize = createOptimizer({
-  loadStaticAsset: (src) => {
-    return readFile(`public${src}`);
-  },
+  domains: ["pbs.twimg.com"],
 });
+app.use(express.static("public"));
 app.get("/img-optimizer", async (req, res, next) => {
   const result = await optimize({
     url: req.url,

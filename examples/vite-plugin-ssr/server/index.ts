@@ -20,6 +20,7 @@ async function startServer() {
     loadStaticAsset: (src) => {
       return readFile(join(root, src));
     },
+    domains: ["pbs.twimg.com"],
   });
   app.get("/img-optimizer", async (req, res, next) => {
     const result = await optimize({

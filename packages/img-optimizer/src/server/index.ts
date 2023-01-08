@@ -16,33 +16,59 @@ const parsePort = (port: string | number | undefined) => {
     } catch (error) {
       return undefined;
     }
+  } else if (typeof port === 'number') {
+    return port;
+  } else {
+    return undefined;
   }
-  return port;
 };
 
 const parseUrl = (url: string | URL) => {
   if (url instanceof URL) {
-    return { url, port: parsePort(url.port || process.env.PORT) };
+    return url;
   }
 
-  let port: number | undefined = undefined;
   const portMatch = /^[A-Z]+?:\/\/[A-Z\d\.-]{2,}\.[A-Z]{2,}:(\d{2,5})?/i.exec(
     url
   );
-
+  let port: number | undefined = undefined;
   if (portMatch?.length === 2) {
     port = parsePort(portMatch[1]);
   }
 
-  port ||= parsePort(process.env.PORT);
+  const parsedUrl = new URL(
+    'http://localhost' +
+      (port ? `:${port}` : '') +
+      url.substring(url.indexOf('/img-optimizer'))
+  );
+
+  return parsedUrl;
+};
+
+const parseRequest = (url: string | URL, headers: Record<string, string>) => {
+  const parsedOriginalUrl = parseUrl(url);
+  const host = headers['host'] || parsedOriginalUrl.host;
+  const splitHost = host?.split(':');
+  const portFromHost = splitHost?.length === 2 ? splitHost[1] : undefined;
+  const port = parsePort(
+    parsedOriginalUrl.port || portFromHost || process.env.PORT
+  );
+
+  const protocol = port === 443 ? 'https://' : 'http://';
+
+  const src = parsedOriginalUrl.searchParams.get('src');
+  const sizeStr = parsedOriginalUrl.searchParams.get('size');
+  const qualityStr = parsedOriginalUrl.searchParams.get('quality');
+
+  const srcUrl =
+    src && new URL(src.startsWith('/') ? protocol + host + src : src);
 
   return {
-    url: new URL(
-      'http://localhost' + port
-        ? `:${port}`
-        : '' + url.substring(url.indexOf('/img-optimizer'))
-    ),
+    url: srcUrl || undefined,
     port,
+    src,
+    size: sizeStr ? parseInt(sizeStr, 10) : undefined,
+    quality: qualityStr ? parseInt(qualityStr, 10) : undefined,
   };
 };
 
@@ -52,15 +78,17 @@ export const createOptimizer = (optimizerOptions?: OptimizerOptions) => {
     cacheSizeMb: 50,
     formats: [
       {
-        format: 'webp',
-        quality: 65,
-      },
-      {
         format: 'avif',
         quality: 45,
       },
+      {
+        format: 'webp',
+        quality: 65,
+      },
     ] as Format[],
+    domains: ['localhost'],
   });
+
   const cache = new ImageCache({
     cacheSizeMb: _optimizerOptions.cacheSizeMb,
   });
@@ -68,23 +96,43 @@ export const createOptimizer = (optimizerOptions?: OptimizerOptions) => {
   const optimize = async (
     optimizeOptions: OptimizerInput
   ): Promise<OptimizerResult> => {
-    const { url, port } = parseUrl(optimizeOptions.url);
-    const searchParams = url.searchParams;
-    const src = searchParams.get('src');
-    const sizeStr = searchParams.get('size');
     const headers = optimizeOptions.headers
       ? parseHeaders(optimizeOptions.headers)
       : {};
 
-    if (!src || !sizeStr) {
+    const {
+      port,
+      src,
+      size,
+      url,
+      quality: requestedQuality,
+    } = parseRequest(optimizeOptions.url, headers);
+
+    if (!src || !size || !url) {
       return { status: 400, body: 'Bad request', headers: {} };
     }
 
-    const size = parseInt(sizeStr, 10);
+    const allowedDomains = _optimizerOptions.domains;
+
+    if (allowedDomains !== true) {
+      const isAllowed =
+        Array.isArray(allowedDomains) &&
+        allowedDomains.some(domain => url.hostname.endsWith(domain));
+      if (!isAllowed) {
+        return {
+          status: 400,
+          body: `Bad request, the domain ${url.hostname} is not allowed`,
+          headers: {},
+        };
+      }
+    }
+
     const accept = headers['accept'] ?? 'webp';
-    const { format, quality } =
+    const { format, quality: defaultQuality } =
       _optimizerOptions.formats.find(f => accept.includes(f.format)) ||
       _optimizerOptions.formats[0];
+
+    const quality = requestedQuality ?? defaultQuality;
 
     const key = `${src}-${size}-${format}-${quality}`;
     const _pending = pending.get(key);
@@ -92,20 +140,20 @@ export const createOptimizer = (optimizerOptions?: OptimizerOptions) => {
       return _pending;
     }
     const promise = (async (): Promise<OptimizerResult> => {
-      let image = cache.get(src);
-      if (!image) {
-        image = new OptimizedImage({ src, sizes: _optimizerOptions.sizes });
-        cache.set(src, image);
-        await image.initialize({
-          headers,
-          loadStaticAsset:
-            optimizeOptions.loadStaticAsset ??
-            _optimizerOptions.loadStaticAsset,
-          port,
-        });
-      }
-
       try {
+        let image = cache.get(src);
+        if (!image) {
+          image = new OptimizedImage({ src, sizes: _optimizerOptions.sizes });
+          cache.set(src, image);
+          await image.initialize({
+            headers,
+            loadStaticAsset:
+              optimizeOptions.loadStaticAsset ??
+              _optimizerOptions.loadStaticAsset,
+            port,
+          });
+        }
+
         const { data, redirectTo } = await image.getSize({
           size,
           format,
@@ -124,7 +172,7 @@ export const createOptimizer = (optimizerOptions?: OptimizerOptions) => {
         return {
           status: 302,
           headers: {
-            Location: '/image?src=' + src + '&size=' + redirectTo,
+            Location: '/img-optimizer?src=' + src + '&size=' + redirectTo,
           },
           body: '',
         };

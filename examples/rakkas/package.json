@@ -1,7 +1,8 @@
 {
-  "name": "-TODO-",
+  "name": "example-rakkas",
   "type": "module",
   "private": true,
+  "version": "0.0.1",
   "scripts": {
     "dev": "rakkas",
     "build": "rakkas build",
