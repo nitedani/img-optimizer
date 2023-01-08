@@ -6,9 +6,9 @@ delivers compressed images to the browser on demand. It prioritizes the [avif](h
 <hr>
 
 Integration examples:
-- [Express](examples/express)
-- [Rakkas](examples/rakkas)
-- [vite-plugin-ssr](examples/vite-plugin-ssr)
+- [Express](./examples/expraess/)
+- [Rakkas](./examples/rakkas/)
+- [vite-plugin-ssr](./examples/vite-plugin-ssr/)
 
 Integration guide:
 
