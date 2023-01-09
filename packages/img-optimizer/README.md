@@ -1,12 +1,12 @@
 # img-optimizer
 
-img-optimizer aims to provide a subset of [next/image](https://nextjs.org/docs/api-reference/next/image) as a framework-independent library, making it possible to integrate with your favorite tools and frameworks. img-optimizer
+img-optimizer aims to provide a subset of [next/image](https://nextjs.org/docs/api-reference/next/image) as an independent library, easy to integrate with your favorite tools. img-optimizer
 delivers compressed images to the browser on demand. It prioritizes the [avif](https://caniuse.com/avif) format when the browser supports it, falling back to [webp](https://caniuse.com/webp).
 
 <hr>
 
 Integration examples:
-- [Express](./examples/expraess/)
+- [Express](./examples/express/)
 - [Rakkas](./examples/rakkas/)
 - [vite-plugin-ssr](./examples/vite-plugin-ssr/)
 
