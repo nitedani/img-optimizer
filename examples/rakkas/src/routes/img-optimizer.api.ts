@@ -8,6 +8,7 @@ const optimize = createOptimizer({
 export async function get(ctx: RequestContext) {
   const result = await optimize({
     url: ctx.url,
+    headers: ctx.request.headers,
   });
 
   return new Response(result.body, {

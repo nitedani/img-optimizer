@@ -12,8 +12,6 @@ if (
       if (entry.isIntersecting) {
         const image = entry.target as HTMLImageElement;
         if (image.dataset.srcset) {
-          console.log('loading image', image.dataset.srcset);
-
           image.srcset = image.dataset.srcset;
         }
         observer.unobserve(image);

@@ -5,8 +5,6 @@ import express from "express";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 import httpDevServer from "vavite/http-dev-server";
-import { readFile } from "fs/promises";
-import { cwd } from "process";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -15,11 +13,7 @@ startServer();
 async function startServer() {
   const app = express();
 
-  const root = import.meta.env.PROD ? join(__dirname, "..", "client") : cwd();
   const optimize = createOptimizer({
-    loadStaticAsset: (src) => {
-      return readFile(join(root, src));
-    },
     domains: ["pbs.twimg.com"],
   });
   app.get("/img-optimizer", async (req, res, next) => {
@@ -33,7 +27,7 @@ async function startServer() {
 
   app.use(
     vpsMiddleware({
-      root,
+      root: join(__dirname, "..", "client"),
     })
   );
 
