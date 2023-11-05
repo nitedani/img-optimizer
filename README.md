@@ -77,6 +77,15 @@ export function Page() {
     </>
   );
 }
+
+Usage with build tools (webpack, vite):
+This library requires the Sharp native dependecies to be present at runtime. There are utilities for both webpack and vite that handle this for you.
+
+- [Vite example](https://github.com/nitedani/vite-plugin-standalone/tree/main/examples/sharp)
+
+- [Webpack](https://github.com/vercel/webpack-asset-relocator-loader)
+
+
 ```
 
 createOptimizer options:
