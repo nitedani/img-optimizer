@@ -77,8 +77,9 @@ export function Page() {
     </>
   );
 }
+```
 
-Usage with build tools (webpack, vite):
+### Usage with build tools (webpack, vite):
 This library requires the Sharp native dependecies to be present at runtime. There are utilities for both webpack and vite that handle this for you.
 
 - [Vite example](https://github.com/nitedani/vite-plugin-standalone/tree/main/examples/sharp)
@@ -86,7 +87,7 @@ This library requires the Sharp native dependecies to be present at runtime. The
 - [Webpack](https://github.com/vercel/webpack-asset-relocator-loader)
 
 
-```
+
 
 createOptimizer options:
 - <b>cacheSizeMb?: number</b><br> img-optimizer caches the compressed images. This option sets the upper limit of the cache size in megabytes.
