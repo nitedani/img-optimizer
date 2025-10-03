@@ -28,7 +28,7 @@ export class ImageCache {
     if (size > this.maxSize) {
       const sorted = [...this.cache.entries()]
         .filter(([, image]) => image.lastAccess < Date.now() - 1000)
-        .sort(([, a], [, b]) => b.lastAccess - a.lastAccess);
+        .sort(([, a], [, b]) => a.lastAccess - b.lastAccess);
       for (const [key, image] of sorted) {
         if (size <= this.maxSize) {
           break;
