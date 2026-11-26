@@ -21,7 +21,6 @@ test('an EXIF-rotated or mirrored photo comes out upright in both formats', asyn
     .jpeg()
     .withMetadata({ orientation: 2 })
     .toBuffer();
-  const pixels = image => sharp(image).raw().toBuffer();
   const optimize = createOptimizer();
   for (const accept of ['image/avif', 'image/webp']) {
     const request = size =>
@@ -48,14 +47,25 @@ test('an EXIF-rotated or mirrored photo comes out upright in both formats', asyn
       headers: { accept },
       loadStaticAsset: () => mirrored,
     });
-    const [, codec] = accept.split('/');
-    const upright = await sharp(mirrored)
-      .rotate()
-      .resize({ width: 360 })
-      [codec]({ quality: { avif: 45, webp: 65 }[codec] })
-      .toBuffer();
-    const actual = await pixels(unmirrored.body);
-    assert.ok(actual.equals(await pixels(upright)), accept);
+    assert.equal(unmirrored.status, 200);
+    const { data, info } = await sharp(unmirrored.body)
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    assert.deepEqual([info.width, info.height, info.channels], [360, 250, 3]);
+    const colour = (x, y) =>
+      [...data.subarray((y * 360 + x) * 3, (y * 360 + x) * 3 + 3)].map(
+        channel => (channel < 128 ? 0 : 255)
+      );
+    assert.deepEqual(
+      [colour(90, 62), colour(270, 62), colour(90, 187), colour(270, 187)],
+      [
+        [0, 0, 255],
+        [255, 0, 0],
+        [0, 255, 255],
+        [255, 255, 0],
+      ],
+      accept
+    );
   }
 });
 
