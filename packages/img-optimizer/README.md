@@ -94,3 +94,34 @@ createOptimizer options:
       }
     ]
 - <b>domains?: string[] | true</b><br> the domains configuration can be used to provide a list of allowed hostnames for external images. Setting it to true removes the restriction.
+
+### Private images
+
+For images that only some users may see, call a separate optimizer from your own route: check access first, put the image's version into `src` so a replaced image is resized again, load the bytes with `loadStaticAsset`, and set `cacheControl`. Its cache is keyed by `src`, so a route that takes `src` from the request must not share it. Pass only the Accept header: with the request's Host header, the `domains` check refuses your own host.
+```ts
+const optimizePrivate = createOptimizer();
+
+app.get("/photos/:id/image", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    if (!(await canView(req.user, id))) {
+      return res.sendStatus(403);
+    }
+    const version = await photoVersion(id); // e.g. the S3 ETag
+    if (!version) {
+      return res.sendStatus(404);
+    }
+    const src = encodeURIComponent(`/photos/${id}/${version}`);
+    const { body, status, headers } = await optimizePrivate({
+      url: `${req.baseUrl}${req.path}?src=${src}&size=${Number(req.query.size)}`,
+      headers: { accept: req.headers.accept },
+      loadStaticAsset: () => loadPhoto(id),
+      cacheControl: "private, no-cache",
+    });
+    res.status(status).header(headers).send(body);
+  } catch (error) {
+    next(error);
+  }
+});
+```
+The page asks for `/photos/5/image?size=640`; an image narrower than the size is redirected to its own width on the same path.
