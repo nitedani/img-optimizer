@@ -97,7 +97,11 @@ export class OptimizedImage {
     if (format === 'avif') {
       // libvips writes the EXIF orientation into AVIF as a rotation; raw pixels carry none.
       const raw = await img.raw().toBuffer({ resolveWithObject: true });
-      img = sharp(raw.data, { raw: raw.info }).avif({ quality });
+      // Not raw.info: its `premultiplied` would make sharp undo the alpha twice.
+      const { width, height, channels } = raw.info;
+      img = sharp(raw.data, { raw: { width, height, channels } }).avif({
+        quality,
+      });
     }
 
     const data = await img.toBuffer();
