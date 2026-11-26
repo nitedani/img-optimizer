@@ -97,7 +97,7 @@ createOptimizer options:
 
 ### Private images
 
-For images that only some users may see, call a separate optimizer from your own route: check access first, put the image's version into `src` so a replaced image is resized again, load the bytes with `loadStaticAsset`, and set `cacheControl`. Its cache is keyed by `src`, so a route that takes `src` from the request must not share it. Pass only the Accept header: with the request's Host header, the `domains` check refuses your own host.
+For images that only some users may see, call a separate optimizer from your own route: check access first, put the image's version into `src` so a replaced image is resized again, load the bytes with `loadStaticAsset`, and set `cacheControl`. Its cache is keyed by `src`, so a route that takes `src` from the request must not share it. Pass only the Accept header: the default `domains` refuses a local `src` resolved against a Host header other than localhost.
 ```ts
 const optimizePrivate = createOptimizer();
 

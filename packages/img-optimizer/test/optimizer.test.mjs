@@ -18,8 +18,11 @@ test('an EXIF-rotated photo keeps its stored orientation in both formats', async
       loadStaticAsset: () => jpeg,
     });
     assert.equal(status, 200);
-    const { width, height } = await sharp(body).metadata();
-    assert.deepEqual([width, height], [360, 250], accept);
+    const { format, width, height } = await sharp(body).metadata();
+    assert.deepEqual(
+      [format, width, height],
+      [{ 'image/avif': 'heif', 'image/webp': 'webp' }[accept], 360, 250]
+    );
   }
 });
 
@@ -55,31 +58,7 @@ test('a semi-transparent image keeps its colours in both formats', async () => {
   }
 });
 
-test('an image answer carries the Cache-Control the caller asks for', async () => {
-  const jpeg = await sharp({
-    create: { width: 720, height: 500, channels: 3, background: 'blue' },
-  })
-    .jpeg()
-    .toBuffer();
-  const optimize = createOptimizer();
-  const request = cacheControl =>
-    optimize({
-      url: '/img-optimizer?src=/photo.jpg&size=360',
-      headers: { accept: 'image/webp' },
-      loadStaticAsset: () => jpeg,
-      cacheControl,
-    });
-  const own = await request('private, no-cache');
-  assert.equal(own.status, 200);
-  assert.equal(own.headers['Cache-Control'], 'private, no-cache');
-  const fallback = await request(undefined);
-  assert.equal(
-    fallback.headers['Cache-Control'],
-    'public, max-age=31536000, immutable'
-  );
-});
-
-test('concurrent callers each get the Cache-Control they ask for', async () => {
+test('each caller gets the Cache-Control it asks for', async () => {
   const jpeg = await sharp({
     create: { width: 720, height: 500, channels: 3, background: 'blue' },
   })
@@ -87,27 +66,32 @@ test('concurrent callers each get the Cache-Control they ask for', async () => {
     .toBuffer();
   const optimize = createOptimizer();
   let loads = 0;
-  const values = ['private, no-cache', 'public, max-age=60', undefined];
-  const answers = await Promise.all(
-    values.map(cacheControl =>
-      optimize({
-        url: '/img-optimizer?src=/photo.jpg&size=360',
-        headers: { accept: 'image/webp' },
-        loadStaticAsset: () => {
-          loads++;
-          return jpeg;
-        },
-        cacheControl,
-      })
-    )
+  const request = cacheControl =>
+    optimize({
+      url: '/img-optimizer?src=/photo.jpg&size=360',
+      headers: { accept: 'image/webp' },
+      loadStaticAsset: () => {
+        loads++;
+        return jpeg;
+      },
+      cacheControl,
+    });
+  const concurrent = await Promise.all(
+    ['private, no-cache', 'public, max-age=60'].map(request)
   );
+  const cached = [
+    await request('private, max-age=0'),
+    await request(undefined),
+  ];
+  const answers = [...concurrent, ...cached];
   assert.equal(loads, 1);
   assert.deepEqual(
-    answers.map(r => r.headers['Cache-Control']),
+    answers.map(r => `${r.status} ${r.headers['Cache-Control']}`),
     [
-      'private, no-cache',
-      'public, max-age=60',
-      'public, max-age=31536000, immutable',
+      '200 private, no-cache',
+      '200 public, max-age=60',
+      '200 private, max-age=0',
+      '200 public, max-age=31536000, immutable',
     ]
   );
   assert.ok(answers.every(r => r.headers.Vary === 'Accept'));
