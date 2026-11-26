@@ -147,13 +147,18 @@ export const createOptimizer = (optimizerOptions?: OptimizerOptions) => {
         if (!image) {
           image = new OptimizedImage({ src, sizes: _optimizerOptions.sizes });
           cache.set(src, image);
-          await image.initialize({
-            headers,
-            loadStaticAsset:
-              optimizeOptions.loadStaticAsset ??
-              _optimizerOptions.loadStaticAsset,
-            port,
-          });
+          await image
+            .initialize({
+              headers,
+              loadStaticAsset:
+                optimizeOptions.loadStaticAsset ??
+                _optimizerOptions.loadStaticAsset,
+              port,
+            })
+            .catch(error => {
+              cache.delete(src);
+              throw error;
+            });
         }
 
         const { data, redirectTo } = await image.getSize({

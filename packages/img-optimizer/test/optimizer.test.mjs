@@ -96,3 +96,36 @@ test('a narrower image redirects to its width on the same path', async () => {
     assert.equal(headers.Location, `${path}?src=/photo.jpg&size=1200`);
   }
 });
+
+test('a failed load is not kept, so the next request loads again', async t => {
+  t.mock.method(console, 'error', () => {});
+  const jpeg = await sharp({
+    create: { width: 720, height: 500, channels: 3, background: 'blue' },
+  })
+    .jpeg()
+    .toBuffer();
+  let loads = 0;
+  let failing = true;
+  const loadStaticAsset = async () => {
+    loads++;
+    if (failing) throw new Error('storage timed out');
+    return jpeg;
+  };
+  const optimize = createOptimizer();
+  const request = (size = 360) =>
+    optimize({
+      url: `/img-optimizer?src=/photo.jpg&size=${size}`,
+      headers: { accept: 'image/webp' },
+      loadStaticAsset,
+    });
+  const failed = await Promise.all([request(360), request(640)]);
+  assert.deepEqual(
+    failed.map(r => r.status),
+    [400, 400]
+  );
+  assert.equal(loads, 1);
+  failing = false;
+  assert.equal((await request()).status, 200);
+  assert.equal((await request(640)).status, 200);
+  assert.equal(loads, 2);
+});

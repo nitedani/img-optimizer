@@ -20,6 +20,9 @@ export class ImageCache {
       this.cache.set(key, value);
     }
   }
+  delete(key: string) {
+    this.cache.delete(key);
+  }
   sweep() {
     let size = 0;
     for (const image of this.cache.values()) {
