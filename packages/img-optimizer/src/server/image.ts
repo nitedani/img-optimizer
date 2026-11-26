@@ -101,8 +101,6 @@ export class OptimizedImage {
       const { width, height, channels } = raw.info;
       img = sharp(raw.data, { raw: { width, height, channels } }).avif({
         quality,
-        // The default effort 4 takes over 700 ms for a cold 640 px image on one thread.
-        effort: 3,
       });
     }
 
