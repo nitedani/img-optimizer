@@ -1,4 +1,4 @@
-import sharp from 'sharp';
+import sharp, { type Sharp } from 'sharp';
 import { StaticAssetLoader } from './types.js';
 import { loadBuffer } from './utils.js';
 export class SizeError extends Error {
@@ -14,7 +14,7 @@ export class OptimizedImage {
   // set in initialize
   originalData!: Buffer;
   originalSize!: number;
-  sharpInstance!: sharp.Sharp;
+  sharpInstance!: Sharp;
 
   initializingPromise?: Promise<void>;
 
@@ -74,7 +74,7 @@ export class OptimizedImage {
       };
     }
 
-    let img: sharp.Sharp;
+    let img: Sharp;
     switch (format) {
       case 'avif':
         img = this.sharpInstance.clone().avif({
