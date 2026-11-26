@@ -88,7 +88,7 @@ export function Page() {
 ```
 
 createOptimizer options:
-- <b>cacheSizeMb?: number</b><br> img-optimizer caches the compressed images. This option sets the upper limit of the cache size in megabytes.
+- <b>cacheSizeMb?: number</b><br> img-optimizer caches the compressed images. Target size in MiB for cached sources and variants, checked when the optimizer tries to cache a new source.
 - <b>sizes?: number[]</b><br> img-optimizer can be restricted to only serve specific sizes(width). If the size is not allowed, a 400 bad response will be returned. default: [360, 640, 1024, 1280, 1600, 1920, 2560, 3840]
 - <b>formats?: Format[]</b><br> default: [
       {
