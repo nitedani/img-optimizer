@@ -126,7 +126,7 @@ app.get("/photos/:id/image", async (req, res, next) => {
     } = await optimizePrivate({
       url: `${req.baseUrl}${req.path}?src=${src}&size=${Number(req.query.size)}`,
       headers: { accept: req.headers.accept },
-      loadStaticAsset: () => loadPhoto(id),
+      loadStaticAsset: () => loadPhoto(id, version),
       cacheControl: "private, no-cache",
     });
     if (Vary) {
@@ -138,4 +138,4 @@ app.get("/photos/:id/image", async (req, res, next) => {
   }
 });
 ```
-The page asks for `/photos/5/image?size=640`; an image narrower than the size is redirected to its own width on the same path.
+`loadPhoto` must return the bytes of that version, e.g. an S3 GET with `IfMatch: version`. The page asks for `/photos/5/image?size=640`; an image narrower than the size is redirected to its own width on the same path.
