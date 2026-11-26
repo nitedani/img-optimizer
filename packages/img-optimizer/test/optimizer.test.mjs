@@ -139,7 +139,7 @@ test('a narrower image redirects to its width on the same path', async () => {
   );
 });
 
-test('a redirect keeps the quality asked for', async () => {
+test('a redirect keeps the quality asked for, even with another cached', async () => {
   const jpeg = await sharp({
     create: {
       width: 1200,
@@ -157,6 +157,7 @@ test('a redirect keeps the quality asked for', async () => {
       loadStaticAsset: () => jpeg,
     });
   const optimize = createOptimizer();
+  const warm = await request(optimize, '/photos/a?src=/photo.jpg&size=1200');
   const redirect = await request(
     optimize,
     '/photos/a?src=/photo.jpg&size=1600&quality=30'
@@ -170,12 +171,8 @@ test('a redirect keeps the quality asked for', async () => {
     createOptimizer(),
     '/photos/a?src=/photo.jpg&size=1200&quality=30'
   );
-  const fallback = await request(
-    createOptimizer(),
-    '/photos/a?src=/photo.jpg&size=1200'
-  );
   assert.equal(followed.body.length, direct.body.length);
-  assert.notEqual(followed.body.length, fallback.body.length);
+  assert.notEqual(followed.body.length, warm.body.length);
 });
 
 test('a redirect keeps an src that has its own query', async () => {

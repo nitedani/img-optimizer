@@ -19,8 +19,8 @@ export class OptimizedImage {
   initializingPromise?: Promise<void>;
 
   allowedSizes: Set<number>;
-  sizesWebp: Map<number, Buffer> = new Map();
-  sizesAvif: Map<number, Buffer> = new Map();
+  sizesWebp: Map<string, Buffer> = new Map();
+  sizesAvif: Map<string, Buffer> = new Map();
   lastAccess = Date.now();
 
   constructor({ src, sizes }: { src: string; sizes?: number[] }) {
@@ -37,15 +37,16 @@ export class OptimizedImage {
     format: 'webp' | 'avif';
     quality: number;
   }) {
+    const key = `${size}-${quality}`;
     switch (format) {
       case 'avif':
-        if (this.sizesAvif.has(size)) {
-          return { data: this.sizesAvif.get(size)!, redirectTo: null };
+        if (this.sizesAvif.has(key)) {
+          return { data: this.sizesAvif.get(key)!, redirectTo: null };
         }
         break;
       case 'webp':
-        if (this.sizesWebp.has(size)) {
-          return { data: this.sizesWebp.get(size)!, redirectTo: null };
+        if (this.sizesWebp.has(key)) {
+          return { data: this.sizesWebp.get(key)!, redirectTo: null };
         }
         break;
       default:
@@ -112,10 +113,10 @@ export class OptimizedImage {
 
     switch (format) {
       case 'avif':
-        this.sizesAvif.set(size, data);
+        this.sizesAvif.set(key, data);
         break;
       case 'webp':
-        this.sizesWebp.set(size, data);
+        this.sizesWebp.set(key, data);
         break;
       default:
         throw new Error('Invalid format');
