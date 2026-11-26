@@ -29,7 +29,14 @@ app.get("/img-optimizer", async (req, res, next) => {
     url: req.url,
     headers: req.headers,
   });
-  const { body, status, headers } = result;
+  const {
+    body,
+    status,
+    headers: { Vary, ...headers },
+  } = result;
+  if (Vary) {
+    res.vary(Vary); // header() would replace a Vary set before
+  }
   res.status(status).header(headers).send(body);
 });
 
@@ -122,12 +129,19 @@ app.get("/photos/:id/image", async (req, res, next) => {
       return res.sendStatus(404);
     }
     const src = encodeURIComponent(`/photos/${id}/${version}`);
-    const { body, status, headers } = await optimizePrivate({
+    const {
+      body,
+      status,
+      headers: { Vary, ...headers },
+    } = await optimizePrivate({
       url: `${req.baseUrl}${req.path}?src=${src}&size=${Number(req.query.size)}`,
       headers: { accept: req.headers.accept },
       loadStaticAsset: () => loadPhoto(id),
       cacheControl: "private, no-cache",
     });
+    if (Vary) {
+      res.vary(Vary);
+    }
     res.status(status).header(headers).send(body);
   } catch (error) {
     next(error);
