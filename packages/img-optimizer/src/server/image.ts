@@ -19,8 +19,7 @@ export class OptimizedImage {
   initializingPromise?: Promise<void>;
 
   allowedSizes: Set<number>;
-  sizesWebp: Map<string, Buffer> = new Map();
-  sizesAvif: Map<string, Buffer> = new Map();
+  variants: Map<string, Buffer> = new Map();
   lastAccess = Date.now();
 
   constructor({ src, sizes }: { src: string; sizes?: number[] }) {
@@ -37,20 +36,13 @@ export class OptimizedImage {
     format: 'webp' | 'avif';
     quality: number;
   }) {
-    const key = `${size}-${quality}`;
-    switch (format) {
-      case 'avif':
-        if (this.sizesAvif.has(key)) {
-          return { data: this.sizesAvif.get(key)!, redirectTo: null };
-        }
-        break;
-      case 'webp':
-        if (this.sizesWebp.has(key)) {
-          return { data: this.sizesWebp.get(key)!, redirectTo: null };
-        }
-        break;
-      default:
-        throw new Error('Invalid format');
+    if (format !== 'avif' && format !== 'webp') {
+      throw new Error('Invalid format');
+    }
+    const key = `${format}-${size}-${quality}`;
+    const cached = this.variants.get(key);
+    if (cached) {
+      return { data: cached, redirectTo: null };
     }
 
     if (!this.initializingPromise) {
@@ -75,21 +67,7 @@ export class OptimizedImage {
       };
     }
 
-    let img: Sharp;
-    switch (format) {
-      case 'avif':
-        img = this.sharpInstance.clone().avif({
-          quality,
-        });
-        break;
-      case 'webp':
-        img = this.sharpInstance.clone().webp({
-          quality,
-        });
-        break;
-      default:
-        throw new Error('Invalid format');
-    }
+    const img = this.sharpInstance.clone()[format]({ quality });
 
     if (newSize < this.originalSize) {
       img.resize(newSize, undefined, { fit: 'inside' });
@@ -111,16 +89,7 @@ export class OptimizedImage {
     //   );
     // }
 
-    switch (format) {
-      case 'avif':
-        this.sizesAvif.set(key, data);
-        break;
-      case 'webp':
-        this.sizesWebp.set(key, data);
-        break;
-      default:
-        throw new Error('Invalid format');
-    }
+    this.variants.set(key, data);
 
     return { data, redirectTo: null };
   }
@@ -156,10 +125,7 @@ export class OptimizedImage {
 
   getCacheSize() {
     let size = this.originalData?.length ?? 0;
-    for (const buffer of this.sizesWebp.values()) {
-      size += buffer.length;
-    }
-    for (const buffer of this.sizesAvif.values()) {
+    for (const buffer of this.variants.values()) {
       size += buffer.length;
     }
 
