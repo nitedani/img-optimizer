@@ -54,3 +54,27 @@ test('a semi-transparent image keeps its colours in both formats', async () => {
     );
   }
 });
+
+test('an image answer carries the Cache-Control the caller asks for', async () => {
+  const jpeg = await sharp({
+    create: { width: 720, height: 500, channels: 3, background: 'blue' },
+  })
+    .jpeg()
+    .toBuffer();
+  const optimize = createOptimizer();
+  const request = cacheControl =>
+    optimize({
+      url: '/img-optimizer?src=/photo.jpg&size=360',
+      headers: { accept: 'image/webp' },
+      loadStaticAsset: () => jpeg,
+      cacheControl,
+    });
+  const own = await request('private, no-cache');
+  assert.equal(own.status, 200);
+  assert.equal(own.headers['Cache-Control'], 'private, no-cache');
+  const fallback = await request(undefined);
+  assert.equal(
+    fallback.headers['Cache-Control'],
+    'public, max-age=31536000, immutable'
+  );
+});

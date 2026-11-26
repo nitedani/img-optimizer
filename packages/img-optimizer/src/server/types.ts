@@ -24,4 +24,6 @@ export interface OptimizerInput {
   url: string | URL;
   headers?: Record<string, string | string[] | undefined> | Headers;
   loadStaticAsset?: StaticAssetLoader;
+  /** The Cache-Control of an image answer; defaults to public, immutable for a year. */
+  cacheControl?: string;
 }

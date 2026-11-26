@@ -164,7 +164,9 @@ export const createOptimizer = (optimizerOptions?: OptimizerOptions) => {
             body: data,
             headers: {
               'Content-Type': `image/${format}`,
-              'Cache-Control': 'public, max-age=31536000, immutable',
+              'Cache-Control':
+                optimizeOptions.cacheControl ??
+                'public, max-age=31536000, immutable',
             },
             status: 200,
           };
