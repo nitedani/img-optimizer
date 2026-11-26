@@ -93,8 +93,26 @@ test('a narrower image redirects to its width on the same path', async () => {
       loadStaticAsset: () => jpeg,
     });
     assert.equal(status, 302);
-    assert.equal(headers.Location, `${path}?src=/photo.jpg&size=1200`);
+    assert.equal(headers.Location, `${path}?src=%2Fphoto.jpg&size=1200`);
   }
+});
+
+test('a redirect keeps an src that has its own query', async () => {
+  const jpeg = await sharp({
+    create: { width: 1200, height: 800, channels: 3, background: 'blue' },
+  })
+    .jpeg()
+    .toBuffer();
+  const src = '/photos/6?v=1&w=2';
+  const { status, headers } = await createOptimizer()({
+    url: `/photos/6/image?src=${encodeURIComponent(src)}&size=1600`,
+    headers: { accept: 'image/webp' },
+    loadStaticAsset: () => jpeg,
+  });
+  assert.equal(status, 302);
+  const location = new URL(headers.Location, 'http://localhost');
+  assert.equal(location.searchParams.get('src'), src);
+  assert.equal(location.searchParams.get('size'), '1200');
 });
 
 test('a failed load is not kept, so the next request loads again', async t => {

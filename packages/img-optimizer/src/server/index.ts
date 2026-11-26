@@ -181,7 +181,9 @@ export const createOptimizer = (optimizerOptions?: OptimizerOptions) => {
         return {
           status: 302,
           headers: {
-            Location: pathname + '?src=' + src + '&size=' + redirectTo,
+            Location: `${pathname}?src=${encodeURIComponent(
+              src
+            )}&size=${redirectTo}`,
           },
           body: '',
         };
