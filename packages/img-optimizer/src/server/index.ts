@@ -200,9 +200,10 @@ export const createOptimizer = (optimizerOptions?: OptimizerOptions) => {
     return {
       status: 302,
       headers: {
-        Location: `${pathname}?src=${encodeURIComponent(src)}&size=${
-          image.redirectTo
-        }`,
+        Location:
+          `${pathname}?src=${encodeURIComponent(src)}` +
+          `&size=${image.redirectTo}` +
+          (requestedQuality ? `&quality=${requestedQuality}` : ''),
       },
       body: '',
     };

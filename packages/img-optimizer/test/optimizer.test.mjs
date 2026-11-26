@@ -146,6 +146,45 @@ test('a narrower image redirects to its width on the same path', async () => {
   );
 });
 
+test('a redirect keeps the quality asked for', async () => {
+  const jpeg = await sharp({
+    create: {
+      width: 1200,
+      height: 800,
+      channels: 3,
+      noise: { type: 'gaussian', mean: 128, sigma: 40 },
+    },
+  })
+    .jpeg()
+    .toBuffer();
+  const request = (optimize, url) =>
+    optimize({
+      url,
+      headers: { accept: 'image/webp' },
+      loadStaticAsset: () => jpeg,
+    });
+  const optimize = createOptimizer();
+  const redirect = await request(
+    optimize,
+    '/photos/a?src=/photo.jpg&size=1600&quality=30'
+  );
+  assert.equal(
+    redirect.headers.Location,
+    '/photos/a?src=%2Fphoto.jpg&size=1200&quality=30'
+  );
+  const followed = await request(optimize, redirect.headers.Location);
+  const direct = await request(
+    createOptimizer(),
+    '/photos/a?src=/photo.jpg&size=1200&quality=30'
+  );
+  const fallback = await request(
+    createOptimizer(),
+    '/photos/a?src=/photo.jpg&size=1200'
+  );
+  assert.equal(followed.body.length, direct.body.length);
+  assert.notEqual(followed.body.length, fallback.body.length);
+});
+
 test('a redirect keeps an src that has its own query', async () => {
   const jpeg = await sharp({
     create: { width: 1200, height: 800, channels: 3, background: 'blue' },
