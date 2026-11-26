@@ -21,20 +21,10 @@ export class OptimizedImage {
   allowedSizes: Set<number>;
   variants: Map<string, Buffer> = new Map();
   lastAccess = Date.now();
-  canCache?: (bytes: number) => boolean;
 
-  constructor({
-    src,
-    sizes,
-    canCache,
-  }: {
-    src: string;
-    sizes?: number[];
-    canCache?: (bytes: number) => boolean;
-  }) {
+  constructor({ src, sizes }: { src: string; sizes?: number[] }) {
     this.src = src;
     this.allowedSizes = new Set(sizes);
-    this.canCache = canCache;
   }
 
   async getSize({
@@ -99,11 +89,7 @@ export class OptimizedImage {
     //   );
     // }
 
-    // A slow encode must not leave this image stale enough to be swept for its own variant.
-    this.lastAccess = Date.now();
-    if (!this.canCache || this.canCache(data.length)) {
-      this.variants.set(key, data);
-    }
+    this.variants.set(key, data);
 
     return { data, redirectTo: null };
   }

@@ -23,20 +23,17 @@ export class ImageCache {
   delete(key: string) {
     this.cache.delete(key);
   }
-  hasRoom(extraBytes: number) {
-    return this.sweep(extraBytes) + extraBytes <= this.maxSize;
-  }
-  sweep(extraBytes = 0) {
+  sweep() {
     let size = 0;
     for (const image of this.cache.values()) {
       size += image.getCacheSize();
     }
-    if (size + extraBytes > this.maxSize) {
+    if (size > this.maxSize) {
       const sorted = [...this.cache.entries()]
         .filter(([, image]) => image.lastAccess < Date.now() - 1000)
         .sort(([, a], [, b]) => a.lastAccess - b.lastAccess);
       for (const [key, image] of sorted) {
-        if (size + extraBytes <= this.maxSize) {
+        if (size <= this.maxSize) {
           break;
         }
         size -= image.getCacheSize();
