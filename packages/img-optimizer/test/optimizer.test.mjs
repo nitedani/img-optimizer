@@ -3,13 +3,25 @@ import assert from 'node:assert/strict';
 import sharp from 'sharp';
 import { createOptimizer } from 'img-optimizer/server';
 
-test('an EXIF-rotated photo comes out upright in both formats', async () => {
+test('an EXIF-rotated or mirrored photo comes out upright in both formats', async () => {
   const jpeg = await sharp({
     create: { width: 720, height: 500, channels: 3, background: 'blue' },
   })
     .jpeg()
     .withMetadata({ orientation: 6 })
     .toBuffer();
+  const quadrants = Buffer.alloc(720 * 500 * 3);
+  for (let i = 0; i < quadrants.length; i += 3) {
+    quadrants[i + ((i / 3) % 720 < 360 ? 0 : 2)] = 255;
+    quadrants[i + 1] = i / 3 < 720 * 250 ? 0 : 255;
+  }
+  const mirrored = await sharp(quadrants, {
+    raw: { width: 720, height: 500, channels: 3 },
+  })
+    .jpeg()
+    .withMetadata({ orientation: 2 })
+    .toBuffer();
+  const pixels = image => sharp(image).raw().toBuffer();
   const optimize = createOptimizer();
   for (const accept of ['image/avif', 'image/webp']) {
     const request = size =>
@@ -31,6 +43,19 @@ test('an EXIF-rotated photo comes out upright in both formats', async () => {
       wider.headers.Location,
       '/img-optimizer?src=%2Fphoto.jpg&size=500'
     );
+    const unmirrored = await optimize({
+      url: '/img-optimizer?src=/mirrored.jpg&size=360',
+      headers: { accept },
+      loadStaticAsset: () => mirrored,
+    });
+    const [, codec] = accept.split('/');
+    const upright = await sharp(mirrored)
+      .rotate()
+      .resize({ width: 360 })
+      [codec]({ quality: { avif: 45, webp: 65 }[codec] })
+      .toBuffer();
+    const actual = await pixels(unmirrored.body);
+    assert.ok(actual.equals(await pixels(upright)), accept);
   }
 });
 
