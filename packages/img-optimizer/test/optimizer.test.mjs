@@ -78,3 +78,21 @@ test('an image answer carries the Cache-Control the caller asks for', async () =
     'public, max-age=31536000, immutable'
   );
 });
+
+test('a narrower image redirects to its width on the same path', async () => {
+  const jpeg = await sharp({
+    create: { width: 1200, height: 800, channels: 3, background: 'blue' },
+  })
+    .jpeg()
+    .toBuffer();
+  const optimize = createOptimizer();
+  for (const path of ['/photos/a', '/img-optimizer']) {
+    const { status, headers } = await optimize({
+      url: `${path}?src=/photo.jpg&size=1600`,
+      headers: { accept: 'image/webp' },
+      loadStaticAsset: () => jpeg,
+    });
+    assert.equal(status, 302);
+    assert.equal(headers.Location, `${path}?src=/photo.jpg&size=1200`);
+  }
+});

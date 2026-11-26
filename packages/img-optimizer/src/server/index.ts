@@ -65,6 +65,7 @@ const parseRequest = (url: string | URL, headers: Record<string, string>) => {
 
   return {
     url: srcUrl || undefined,
+    pathname: parsedOriginalUrl.pathname,
     port,
     src,
     size: sizeStr ? parseInt(sizeStr, 10) : undefined,
@@ -101,6 +102,7 @@ export const createOptimizer = (optimizerOptions?: OptimizerOptions) => {
       : {};
 
     const {
+      pathname,
       port,
       src,
       size,
@@ -174,7 +176,7 @@ export const createOptimizer = (optimizerOptions?: OptimizerOptions) => {
         return {
           status: 302,
           headers: {
-            Location: '/img-optimizer?src=' + src + '&size=' + redirectTo,
+            Location: pathname + '?src=' + src + '&size=' + redirectTo,
           },
           body: '',
         };
