@@ -110,6 +110,7 @@ test('concurrent callers each get the Cache-Control they ask for', async () => {
       'public, max-age=31536000, immutable',
     ]
   );
+  assert.ok(answers.every(r => r.headers.Vary === 'Accept'));
 });
 
 test('a narrower image redirects to its width on the same path', async () => {
