@@ -175,6 +175,45 @@ test('a redirect keeps the quality asked for, even with another cached', async (
   assert.notEqual(followed.body.length, warm.body.length);
 });
 
+test('variants that would overflow cacheSizeMb are served but not kept', async () => {
+  const [width, height] = [1200, 800];
+  const pixels = Buffer.alloc(width * height * 3);
+  let seed = 123456789;
+  for (let i = 0; i < pixels.length; i++) {
+    seed ^= seed << 13;
+    seed ^= seed >>> 17;
+    seed ^= seed << 5;
+    pixels[i] = seed >>> 24;
+  }
+  const jpeg = await sharp(pixels, { raw: { width, height, channels: 3 } })
+    .jpeg()
+    .toBuffer();
+  // The photo and its q45 variant fit in 1.25 MB; another variant does not.
+  const optimize = createOptimizer({ cacheSizeMb: 1.25 });
+  let loads = 0;
+  const request = quality =>
+    optimize({
+      url: `/img-optimizer?src=/noise.jpg&size=1200&quality=${quality}`,
+      headers: { accept: 'image/webp' },
+      loadStaticAsset: () => {
+        loads++;
+        return jpeg;
+      },
+    });
+  const answers = [];
+  for (const quality of [45, 65, 85]) {
+    const answer = await request(quality);
+    assert.equal(answer.status, 200);
+    const direct = await sharp(jpeg).webp({ quality }).toBuffer();
+    assert.ok(answer.body.equals(direct), `q${quality}`);
+    answers.push(answer);
+  }
+  const [q45, q65] = answers;
+  assert.equal((await request(45)).body, q45.body);
+  assert.notEqual((await request(65)).body, q65.body);
+  assert.equal(loads, 1);
+});
+
 test('a redirect keeps an src that has its own query', async () => {
   const jpeg = await sharp({
     create: { width: 1200, height: 800, channels: 3, background: 'blue' },

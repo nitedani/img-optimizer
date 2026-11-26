@@ -142,7 +142,11 @@ export const createOptimizer = (optimizerOptions?: OptimizerOptions) => {
       try {
         let image = cache.get(src);
         if (!image) {
-          image = new OptimizedImage({ src, sizes: _optimizerOptions.sizes });
+          image = new OptimizedImage({
+            src,
+            sizes: _optimizerOptions.sizes,
+            canCache: bytes => cache.hasRoom(bytes),
+          });
           cache.set(src, image);
           await image
             .initialize({
