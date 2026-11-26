@@ -38,10 +38,9 @@ const parseUrl = (url: string | URL) => {
     port = parsePort(portMatch[1]);
   }
 
+  const { pathname, search } = new URL(url, 'http://localhost');
   const parsedUrl = new URL(
-    'http://localhost' +
-      (port ? `:${port}` : '') +
-      url.substring(url.indexOf('/img-optimizer'))
+    'http://localhost' + (port ? `:${port}` : '') + pathname + search
   );
 
   return parsedUrl;

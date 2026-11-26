@@ -119,11 +119,22 @@ test('a narrower image redirects to its width on the same path', async () => {
     .jpeg()
     .toBuffer();
   const optimize = createOptimizer();
-  const paths = ['/photos/a', '/img-optimizer'];
+  const query = '?src=/photo.jpg&size=1600';
+  const requests = [
+    ['/photos/a' + query, '/photos/a'],
+    ['/img-optimizer' + query, '/img-optimizer'],
+    ['/gallery/img-optimizer' + query, '/gallery/img-optimizer'],
+    ['http://localhost:3041/gallery/photo' + query, '/gallery/photo'],
+    ['http://app.example.com:3041/gallery/photo' + query, '/gallery/photo'],
+    [
+      new URL('/gallery/img-optimizer' + query, 'http://localhost'),
+      '/gallery/img-optimizer',
+    ],
+  ];
   const answers = await Promise.all(
-    paths.map(path =>
+    requests.map(([url]) =>
       optimize({
-        url: `${path}?src=/photo.jpg&size=1600`,
+        url,
         headers: { accept: 'image/webp' },
         loadStaticAsset: () => jpeg,
       })
@@ -131,7 +142,7 @@ test('a narrower image redirects to its width on the same path', async () => {
   );
   assert.deepEqual(
     answers.map(({ status, headers }) => `${status} ${headers.Location}`),
-    paths.map(path => `302 ${path}?src=%2Fphoto.jpg&size=1200`)
+    requests.map(([, path]) => `302 ${path}?src=%2Fphoto.jpg&size=1200`)
   );
 });
 
