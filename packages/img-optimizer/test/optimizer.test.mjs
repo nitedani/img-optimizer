@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import sharp from 'sharp';
 import { createOptimizer } from 'img-optimizer/server';
 
-test('an EXIF-rotated photo keeps its stored orientation in both formats', async () => {
+test('an EXIF-rotated photo comes out upright in both formats', async () => {
   const jpeg = await sharp({
     create: { width: 720, height: 500, channels: 3, background: 'blue' },
   })
@@ -12,16 +12,24 @@ test('an EXIF-rotated photo keeps its stored orientation in both formats', async
     .toBuffer();
   const optimize = createOptimizer();
   for (const accept of ['image/avif', 'image/webp']) {
-    const { status, body } = await optimize({
-      url: '/img-optimizer?src=/photo.jpg&size=360',
-      headers: { accept },
-      loadStaticAsset: () => jpeg,
-    });
+    const request = size =>
+      optimize({
+        url: `/img-optimizer?src=/photo.jpg&size=${size}`,
+        headers: { accept },
+        loadStaticAsset: () => jpeg,
+      });
+    const { status, body } = await request(360);
     assert.equal(status, 200);
     const { format, width, height } = await sharp(body).metadata();
     assert.deepEqual(
       [format, width, height],
-      [{ 'image/avif': 'heif', 'image/webp': 'webp' }[accept], 360, 250]
+      [{ 'image/avif': 'heif', 'image/webp': 'webp' }[accept], 360, 518]
+    );
+    const wider = await request(640);
+    assert.equal(wider.status, 302, accept);
+    assert.equal(
+      wider.headers.Location,
+      '/img-optimizer?src=%2Fphoto.jpg&size=500'
     );
   }
 });

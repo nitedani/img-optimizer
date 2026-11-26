@@ -94,16 +94,6 @@ export class OptimizedImage {
       img.resize(newSize, undefined, { fit: 'inside' });
     }
 
-    if (format === 'avif') {
-      // libvips writes the EXIF orientation into AVIF as a rotation; raw pixels carry none.
-      const raw = await img.raw().toBuffer({ resolveWithObject: true });
-      // Not raw.info: its `premultiplied` would make sharp undo the alpha twice.
-      const { width, height, channels } = raw.info;
-      img = sharp(raw.data, { raw: { width, height, channels } }).avif({
-        quality,
-      });
-    }
-
     const data = await img.toBuffer();
 
     // if (newSize < this.originalSize) {
@@ -154,8 +144,10 @@ export class OptimizedImage {
         port,
       });
       this.originalData = buffer;
-      this.sharpInstance = sharp(buffer);
-      this.originalSize = (await this.sharpInstance.metadata()).width ?? 0;
+      this.sharpInstance = sharp(buffer).autoOrient();
+      this.originalSize = (
+        await this.sharpInstance.metadata()
+      ).autoOrient.width;
       this.allowedSizes.add(this.originalSize);
     })();
     return this.initializingPromise;
