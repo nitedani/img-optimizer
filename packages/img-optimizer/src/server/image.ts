@@ -94,6 +94,12 @@ export class OptimizedImage {
       img.resize(newSize, undefined, { fit: 'inside' });
     }
 
+    if (format === 'avif') {
+      // libvips writes the EXIF orientation into AVIF as a rotation; raw pixels carry none.
+      const raw = await img.raw().toBuffer({ resolveWithObject: true });
+      img = sharp(raw.data, { raw: raw.info }).avif({ quality });
+    }
+
     const data = await img.toBuffer();
 
     // if (newSize < this.originalSize) {
