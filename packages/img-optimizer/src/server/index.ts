@@ -9,6 +9,8 @@ import {
 } from './types.js';
 import { parseHeaders } from './utils.js';
 
+type SizedImage = Awaited<ReturnType<OptimizedImage['getSize']>>;
+
 const parsePort = (port: string | number | undefined) => {
   if (typeof port === 'string') {
     try {
@@ -93,7 +95,7 @@ export const createOptimizer = (optimizerOptions?: OptimizerOptions) => {
   const cache = new ImageCache({
     cacheSizeMb: _optimizerOptions.cacheSizeMb,
   });
-  const pending = new Map<string, Promise<OptimizerResult>>();
+  const pending = new Map<string, Promise<SizedImage | null>>();
   const optimize = async (
     optimizeOptions: OptimizerInput
   ): Promise<OptimizerResult> => {
@@ -137,11 +139,7 @@ export const createOptimizer = (optimizerOptions?: OptimizerOptions) => {
     const quality = requestedQuality ?? defaultQuality;
 
     const key = `${src}-${size}-${format}-${quality}`;
-    const _pending = pending.get(key);
-    if (_pending) {
-      return _pending;
-    }
-    const promise = (async (): Promise<OptimizerResult> => {
+    const sizeImage = async (): Promise<SizedImage | null> => {
       try {
         let image = cache.get(src);
         if (!image) {
@@ -161,52 +159,54 @@ export const createOptimizer = (optimizerOptions?: OptimizerOptions) => {
             });
         }
 
-        const { data, redirectTo } = await image.getSize({
+        return await image.getSize({
           size,
           format,
           quality,
         });
-        if (data) {
-          return {
-            body: data,
-            headers: {
-              'Content-Type': `image/${format}`,
-              'Cache-Control':
-                optimizeOptions.cacheControl ??
-                'public, max-age=31536000, immutable',
-            },
-            status: 200,
-          };
-        }
-        return {
-          status: 302,
-          headers: {
-            Location: `${pathname}?src=${encodeURIComponent(
-              src
-            )}&size=${redirectTo}`,
-          },
-          body: '',
-        };
       } catch (error: any) {
-        if (error instanceof SizeError) {
-          return {
-            status: 400,
-            body: 'Bad request',
-            headers: {},
-          };
+        if (!(error instanceof SizeError)) {
+          console.error(error);
         }
-        console.error(error);
-        return {
-          status: 400,
-          body: 'Bad request',
-          headers: {},
-        };
+        return null;
       }
-    })();
-    pending.set(key, promise);
-    const result = await promise;
-    pending.delete(key);
-    return result;
+    };
+    let sized = pending.get(key);
+    if (!sized) {
+      sized = sizeImage().finally(() => pending.delete(key));
+      pending.set(key, sized);
+    }
+
+    // Concurrent callers share the image; each answer gets the caller's own headers.
+    const image = await sized;
+    if (!image) {
+      return {
+        status: 400,
+        body: 'Bad request',
+        headers: {},
+      };
+    }
+    if (image.data) {
+      return {
+        body: image.data,
+        headers: {
+          'Content-Type': `image/${format}`,
+          'Cache-Control':
+            optimizeOptions.cacheControl ??
+            'public, max-age=31536000, immutable',
+        },
+        status: 200,
+      };
+    }
+    return {
+      status: 302,
+      headers: {
+        Location: `${pathname}?src=${encodeURIComponent(src)}&size=${
+          image.redirectTo
+        }`,
+      },
+      body: '',
+    };
   };
 
   return optimize;

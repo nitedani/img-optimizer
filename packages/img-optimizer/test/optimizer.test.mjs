@@ -79,6 +79,39 @@ test('an image answer carries the Cache-Control the caller asks for', async () =
   );
 });
 
+test('concurrent callers each get the Cache-Control they ask for', async () => {
+  const jpeg = await sharp({
+    create: { width: 720, height: 500, channels: 3, background: 'blue' },
+  })
+    .jpeg()
+    .toBuffer();
+  const optimize = createOptimizer();
+  let loads = 0;
+  const values = ['private, no-cache', 'public, max-age=60', undefined];
+  const answers = await Promise.all(
+    values.map(cacheControl =>
+      optimize({
+        url: '/img-optimizer?src=/photo.jpg&size=360',
+        headers: { accept: 'image/webp' },
+        loadStaticAsset: () => {
+          loads++;
+          return jpeg;
+        },
+        cacheControl,
+      })
+    )
+  );
+  assert.equal(loads, 1);
+  assert.deepEqual(
+    answers.map(r => r.headers['Cache-Control']),
+    [
+      'private, no-cache',
+      'public, max-age=60',
+      'public, max-age=31536000, immutable',
+    ]
+  );
+});
+
 test('a narrower image redirects to its width on the same path', async () => {
   const jpeg = await sharp({
     create: { width: 1200, height: 800, channels: 3, background: 'blue' },
@@ -86,15 +119,20 @@ test('a narrower image redirects to its width on the same path', async () => {
     .jpeg()
     .toBuffer();
   const optimize = createOptimizer();
-  for (const path of ['/photos/a', '/img-optimizer']) {
-    const { status, headers } = await optimize({
-      url: `${path}?src=/photo.jpg&size=1600`,
-      headers: { accept: 'image/webp' },
-      loadStaticAsset: () => jpeg,
-    });
-    assert.equal(status, 302);
-    assert.equal(headers.Location, `${path}?src=%2Fphoto.jpg&size=1200`);
-  }
+  const paths = ['/photos/a', '/img-optimizer'];
+  const answers = await Promise.all(
+    paths.map(path =>
+      optimize({
+        url: `${path}?src=/photo.jpg&size=1600`,
+        headers: { accept: 'image/webp' },
+        loadStaticAsset: () => jpeg,
+      })
+    )
+  );
+  assert.deepEqual(
+    answers.map(({ status, headers }) => `${status} ${headers.Location}`),
+    paths.map(path => `302 ${path}?src=%2Fphoto.jpg&size=1200`)
+  );
 });
 
 test('a redirect keeps an src that has its own query', async () => {
