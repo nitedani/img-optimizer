@@ -207,10 +207,13 @@ test('a variant evicted while load checked it is read again', async () => {
   await request(6);
   release();
   const answer = await again;
+  Object.assign(store, { etag: 'v2', data: other });
+  const replaced = await request(5);
+  assert.equal(replaced.headers.ETag, 'W/"v2-webp-640-65"');
   assert.deepEqual([answer.status, answer.body], [200, first.body]);
   assert.deepEqual(
     store.calls.map(([, etag]) => etag),
-    [undefined, 'v1', undefined]
+    [undefined, 'v1', undefined, 'v1']
   );
 });
 
