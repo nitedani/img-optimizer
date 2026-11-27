@@ -29,14 +29,7 @@ app.get("/img-optimizer", async (req, res, next) => {
     url: req.url,
     headers: req.headers,
   });
-  const {
-    body,
-    status,
-    headers: { Vary, ...headers },
-  } = result;
-  if (Vary) {
-    res.vary(Vary); // header() would replace a Vary set before
-  }
+  const { body, status, headers } = result;
   res.status(status).header(headers).send(body);
 });
 
@@ -88,7 +81,7 @@ export function Page() {
 ```
 
 createOptimizer options:
-- <b>cacheSizeMb?: number</b><br> img-optimizer caches the compressed images. Target size in MiB for cached sources and variants, checked when the optimizer tries to cache a new source.
+- <b>cacheSizeMb?: number</b><br> img-optimizer caches the compressed images and the originals they are made from. This option sets the upper limit of the cache size in megabytes; originals are dropped first.
 - <b>sizes?: number[]</b><br> img-optimizer can be restricted to only serve specific sizes(width). If the size is not allowed, a 400 bad response will be returned. default: [360, 640, 1024, 1280, 1600, 1920, 2560, 3840]
 - <b>formats?: Format[]</b><br> default: [
       {
@@ -104,38 +97,23 @@ createOptimizer options:
 
 ### Private images
 
-For images that only some users may see, call a separate optimizer from your own route: check access first, put the image's version into `src` so a replaced image is resized again, load the bytes with `loadStaticAsset`, and set `cacheControl`. Its cache is keyed by `src`, so a route that takes `src` from the request must not share it. Pass only the Accept header so local `src` values resolve against the optimizer's default local host.
+For images that only some users may see, check access in your own route, then pass `load`. The optimizer serves the image at the request's path instead of `?src=`, so a public `?src=` request never reaches it. Requests for the same path at the same time share one `load` call, so check access before calling `optimize`.
 ```ts
-const optimizePrivate = createOptimizer();
-
 app.get("/photos/:id/image", async (req, res, next) => {
   try {
-    const { id } = req.params;
-    if (!(await canView(req.user, id))) {
+    if (!(await canView(req.user, req.params.id))) {
       return res.sendStatus(403);
     }
-    const version = await photoVersion(id); // e.g. the S3 ETag
-    if (!version) {
-      return res.sendStatus(404);
-    }
-    const src = encodeURIComponent(`/photos/${id}/${version}`);
-    const {
-      body,
-      status,
-      headers: { Vary, ...headers },
-    } = await optimizePrivate({
-      url: `${req.baseUrl}${req.path}?src=${src}&size=${Number(req.query.size)}`,
-      headers: { accept: req.headers.accept },
-      loadStaticAsset: () => loadPhoto(id, version),
-      cacheControl: "private, no-cache",
+    const result = await optimize({
+      url: req.url,
+      headers: req.headers,
+      load: (src, held) => loadPhoto(req.params.id, held),
     });
-    if (Vary) {
-      res.vary(Vary);
-    }
+    const { body, status, headers } = result;
     res.status(status).header(headers).send(body);
   } catch (error) {
     next(error);
   }
 });
 ```
-`loadPhoto` must return the bytes of that version, e.g. an S3 GET with `IfMatch: version`. The page asks for `/photos/5/image?size=640`; an image narrower than the size is redirected to its own width on the same path.
+`load(src, held)` returns `{ version, data }`, or `null` for a missing image (a 404). `version` changes whenever the image does, e.g. its S3 ETag without the quotes, and `data` is its bytes. `held` is the version the optimizer already has: when it is still current, leave out `data`, e.g. from an S3 GET with `IfNoneMatch: held`. Answers carry an `ETag`, so a browser asking again for an unchanged image gets a 304 with no download, and `Cache-Control: private, no-cache`; a page that puts the version in the URL (`/photos/5/image?size=640&v=<version>`) lets the browser keep it for a day. An image narrower than the size is answered at its own width. `createOptimizer({ load })` uses one loader for every request.

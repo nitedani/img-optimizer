@@ -21,14 +21,7 @@ async function startServer() {
       url: req.url,
       headers: req.headers,
     });
-    const {
-      body,
-      status,
-      headers: { Vary, ...headers },
-    } = result;
-    if (Vary) {
-      res.vary(Vary);
-    }
+    const { body, status, headers } = result;
     res.status(status).header(headers).send(body);
   });
 

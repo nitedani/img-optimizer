@@ -312,10 +312,7 @@ export function createOptimizer(
         body: image.data,
         headers: {
           'Content-Type': `image/${format}`,
-          Vary: 'Accept',
-          'Cache-Control':
-            optimizeOptions.cacheControl ??
-            'public, max-age=31536000, immutable',
+          'Cache-Control': 'public, max-age=31536000, immutable',
         },
         status: 200,
       };

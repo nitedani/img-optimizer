@@ -18,6 +18,29 @@ const noisyJpeg = (width, height) =>
     .jpeg()
     .toBuffer();
 
+const solidJpeg = (width, height, background) =>
+  sharp({ create: { width, height, channels: 3, background } })
+    .jpeg()
+    .toBuffer();
+
+// An S3-like store: `held` still current answers without bytes.
+const photoStore = async () => {
+  const store = {
+    version: 'v1',
+    data: await solidJpeg(1200, 800, 'blue'),
+    calls: [],
+  };
+  store.load = async (src, held) => {
+    store.calls.push([src, held]);
+    if (!store.data) return null;
+    if (held === store.version) return { version: store.version };
+    const bytes = new Uint8Array(store.data.length + 8);
+    bytes.set(store.data, 8);
+    return { version: store.version, data: bytes.subarray(8) };
+  };
+  return store;
+};
+
 test('an EXIF-rotated or mirrored photo comes out upright in both formats', async () => {
   const jpeg = await sharp({
     create: { width: 720, height: 500, channels: 3, background: 'blue' },
@@ -116,43 +139,51 @@ test('a semi-transparent image keeps its colours in both formats', async () => {
   }
 });
 
-test('each caller gets the Cache-Control it asks for', async () => {
-  const jpeg = await sharp({
-    create: { width: 720, height: 500, channels: 3, background: 'blue' },
-  })
-    .jpeg()
-    .toBuffer();
+test('a public answer keeps its headers, and each load answer gets its own', async () => {
+  const jpeg = await solidJpeg(720, 500, 'blue');
   const optimize = createOptimizer();
   let loads = 0;
-  const request = cacheControl =>
-    optimize({
-      url: '/img-optimizer?src=/photo.jpg&size=360',
-      headers: { accept: 'image/webp' },
-      loadStaticAsset: () => {
-        loads++;
-        return jpeg;
-      },
-      cacheControl,
-    });
-  const concurrent = await Promise.all(
-    ['private, no-cache', 'public, max-age=60'].map(request)
+  const publicAnswers = await Promise.all(
+    [0, 1].map(() =>
+      optimize({
+        url: '/img-optimizer?src=/photo.jpg&size=360',
+        headers: { accept: 'image/webp' },
+        loadStaticAsset: () => {
+          loads++;
+          return jpeg;
+        },
+      })
+    )
   );
-  const cached = [
-    await request('private, max-age=0'),
-    await request(undefined),
-  ];
-  const answers = [...concurrent, ...cached];
   assert.equal(loads, 1);
   assert.deepEqual(
-    answers.map(r => `${r.status} ${r.headers['Cache-Control']}`),
+    publicAnswers.map(r => r.headers),
+    Array(2).fill({
+      'Content-Type': 'image/webp',
+      'Cache-Control': 'public, max-age=31536000, immutable',
+    })
+  );
+  const store = await photoStore();
+  const privateAnswers = await Promise.all(
+    ['size=360', 'size=360&v=v1', 'size=360&v=v0'].map(query =>
+      optimize({
+        url: `/photos/5/image?${query}`,
+        headers: { accept: 'image/webp' },
+        load: store.load,
+      })
+    )
+  );
+  assert.equal(store.calls.length, 1);
+  assert.deepEqual(
+    privateAnswers.map(
+      r => `${r.status} ${r.headers['Cache-Control']} ${r.headers.Vary}`
+    ),
     [
-      '200 private, no-cache',
-      '200 public, max-age=60',
-      '200 private, max-age=0',
-      '200 public, max-age=31536000, immutable',
+      '200 private, no-cache Accept',
+      '200 private, max-age=86400 Accept',
+      '200 private, no-cache Accept',
     ]
   );
-  assert.ok(answers.every(r => r.headers.Vary === 'Accept'));
 });
 
 test('a narrower image redirects to its width on the same path', async () => {
@@ -398,29 +429,6 @@ test('the cache stays within its bytes and evicts originals before variants', as
   );
   assert.equal(cache.held('g 1'), undefined);
 });
-
-const solidJpeg = (width, height, background) =>
-  sharp({ create: { width, height, channels: 3, background } })
-    .jpeg()
-    .toBuffer();
-
-// An S3-like store: `held` still current answers without bytes.
-const photoStore = async () => {
-  const store = {
-    version: 'v1',
-    data: await solidJpeg(1200, 800, 'blue'),
-    calls: [],
-  };
-  store.load = async (src, held) => {
-    store.calls.push([src, held]);
-    if (!store.data) return null;
-    if (held === store.version) return { version: store.version };
-    const bytes = new Uint8Array(store.data.length + 8);
-    bytes.set(store.data, 8);
-    return { version: store.version, data: bytes.subarray(8) };
-  };
-  return store;
-};
 
 test('load serves the image at the pathname, given as an option or per call', async () => {
   for (const via of ['options', 'per call']) {
