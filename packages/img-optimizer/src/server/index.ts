@@ -1,15 +1,15 @@
 import { defu } from 'defu';
-import { ImageCache } from './cache.js';
-import { OptimizedImage, SizeError } from './image.js';
+import { EncodedVariant, ImageCache, Original } from './cache.js';
+import { encode, readWidth } from './encode.js';
 import {
   OptimizerOptions,
   Format,
   OptimizerResult,
   OptimizerInput,
 } from './types.js';
-import { parseHeaders } from './utils.js';
+import { loadBuffer, parseHeaders } from './utils.js';
 
-type SizedImage = Awaited<ReturnType<OptimizedImage['getSize']>>;
+class SizeError extends Error {}
 
 const parsePort = (port: string | number | undefined) => {
   if (typeof port === 'string') {
@@ -91,10 +91,18 @@ export const createOptimizer = (optimizerOptions?: OptimizerOptions) => {
     domains: ['localhost'],
   });
 
-  const cache = new ImageCache({
-    cacheSizeMb: _optimizerOptions.cacheSizeMb,
-  });
-  const pending = new Map<string, Promise<SizedImage | null>>();
+  const cache = new ImageCache(_optimizerOptions.cacheSizeMb * 1024 * 1024);
+  const inFlightLoads = new Map<string, Promise<unknown>>();
+  // Concurrent misses for one source share its read.
+  const readOnce = <T>(key: string, read: () => Promise<T>) => {
+    let pending = inFlightLoads.get(key) as Promise<T> | undefined;
+    if (!pending) {
+      pending = read().finally(() => inFlightLoads.delete(key));
+      inFlightLoads.set(key, pending);
+    }
+    return pending;
+  };
+
   const optimize = async (
     optimizeOptions: OptimizerInput
   ): Promise<OptimizerResult> => {
@@ -137,55 +145,55 @@ export const createOptimizer = (optimizerOptions?: OptimizerOptions) => {
 
     const quality = requestedQuality ?? defaultQuality;
 
-    const key = `${src}-${size}-${format}-${quality}`;
-    const sizeImage = async (): Promise<SizedImage | null> => {
-      try {
-        let image = cache.get(src);
-        if (!image) {
-          image = new OptimizedImage({ src, sizes: _optimizerOptions.sizes });
-          cache.set(src, image);
-          await image
-            .initialize({
-              headers,
-              loadStaticAsset:
-                optimizeOptions.loadStaticAsset ??
-                _optimizerOptions.loadStaticAsset,
-              port,
-            })
-            .catch(error => {
-              cache.delete(src);
-              throw error;
-            });
-        }
-
-        return await image.getSize({
-          size,
-          format,
-          quality,
-        });
-      } catch (error: any) {
-        if (!(error instanceof SizeError)) {
-          console.error(error);
-        }
-        return null;
-      }
+    const originalKey = `public:${src}`;
+    const readOriginal = async (): Promise<Original> => {
+      const data = await loadBuffer({
+        src,
+        headers,
+        loadStaticAsset:
+          optimizeOptions.loadStaticAsset ?? _optimizerOptions.loadStaticAsset,
+        port,
+      });
+      const original = {
+        version: '',
+        data,
+        originalWidth: await readWidth(data),
+      };
+      cache.setOriginal(originalKey, original);
+      return original;
     };
-    let sized = pending.get(key);
-    if (!sized) {
-      sized = sizeImage().finally(() => pending.delete(key));
-      pending.set(key, sized);
-    }
+    const sizeImage = async (): Promise<EncodedVariant> => {
+      const { data, originalWidth } =
+        cache.original(originalKey, '') ??
+        (await readOnce(`${originalKey}:`, readOriginal));
+      if (size !== originalWidth && !_optimizerOptions.sizes.includes(size)) {
+        throw new SizeError();
+      }
+      if (size > originalWidth) {
+        return { redirectTo: originalWidth };
+      }
+      return { data: await encode(data, format, quality, size) };
+    };
 
-    // Concurrent callers share the image; each answer gets the caller's own headers.
-    const image = await sized;
-    if (!image) {
+    let image: EncodedVariant;
+    try {
+      image = await cache.variant(
+        `${originalKey}:${format}:${size}:${quality}`,
+        '',
+        quality,
+        sizeImage
+      );
+    } catch (error) {
+      if (!(error instanceof SizeError)) {
+        console.error(error);
+      }
       return {
         status: 400,
         body: 'Bad request',
         headers: {},
       };
     }
-    if (image.data) {
+    if ('data' in image) {
       return {
         body: image.data,
         headers: {

@@ -1,45 +1,126 @@
-import { OptimizedImage } from './image.js';
+export type EncodedVariant = { data: Buffer } | { redirectTo: number };
 
+export interface Original {
+  version: string;
+  data: Buffer;
+  originalWidth: number;
+}
+
+interface Variant {
+  version: string;
+  quality: number;
+  image: Promise<EncodedVariant>;
+  /** Unset while the variant is encoding. */
+  bytes?: number;
+}
+
+const touch = <T>(map: Map<string, T>, key: string, value: T) => {
+  map.delete(key);
+  map.set(key, value);
+};
+
+/**
+ * Encoded variants and the originals they are encoded from, least recently
+ * used first, sharing one byte budget; originals are evicted before variants.
+ */
 export class ImageCache {
-  maxSize: number;
-  cache: Map<string, OptimizedImage> = new Map();
+  variantBytes = 0;
+  originalBytes = 0;
+  private variants = new Map<string, Variant>();
+  private originals = new Map<string, Original>();
 
-  constructor({ cacheSizeMb }: { cacheSizeMb: number }) {
-    this.maxSize = cacheSizeMb * 1024 * 1024;
+  constructor(private maxBytes: number) {}
+
+  held(key: string) {
+    return this.variants.get(key)?.version;
   }
 
-  get(key: string) {
-    const val = this.cache.get(key);
-    if (val) {
-      val.lastAccess = Date.now();
-    }
-    return val;
+  quality(key: string) {
+    return this.variants.get(key)?.quality;
   }
-  set(key: string, value: OptimizedImage) {
-    if (this.sweep() < this.maxSize) {
-      this.cache.set(key, value);
+
+  /** The variant cached under `key` at `version`, encoded with `encode` on a miss. */
+  variant(
+    key: string,
+    version: string,
+    quality: number,
+    encode: () => Promise<EncodedVariant>
+  ) {
+    const cached = this.variants.get(key);
+    if (cached?.version === version) {
+      touch(this.variants, key, cached);
+      return cached.image;
     }
-  }
-  delete(key: string) {
-    this.cache.delete(key);
-  }
-  sweep() {
-    let size = 0;
-    for (const image of this.cache.values()) {
-      size += image.getCacheSize();
-    }
-    if (size > this.maxSize) {
-      const sorted = [...this.cache.entries()]
-        .filter(([, image]) => image.lastAccess < Date.now() - 1000)
-        .sort(([, a], [, b]) => a.lastAccess - b.lastAccess);
-      for (const [key, image] of sorted) {
-        if (size <= this.maxSize) {
-          break;
+    this.deleteVariant(key);
+    const variant: Variant = { version, quality, image: encode() };
+    this.variants.set(key, variant);
+    variant.image.then(
+      image => {
+        if (this.variants.get(key) !== variant) {
+          return;
         }
-        size -= image.getCacheSize();
-        this.cache.delete(key);
+        const bytes = 'data' in image ? image.data.length : 0;
+        if (bytes > this.maxBytes) {
+          this.variants.delete(key);
+          return;
+        }
+        variant.bytes = bytes;
+        this.variantBytes += bytes;
+        touch(this.variants, key, variant);
+        this.trim();
+      },
+      () => {
+        if (this.variants.get(key) === variant) {
+          this.variants.delete(key);
+        }
+      }
+    );
+    return variant.image;
+  }
+
+  original(key: string, version: string) {
+    const original = this.originals.get(key);
+    if (original?.version !== version) {
+      return undefined;
+    }
+    touch(this.originals, key, original);
+    return original;
+  }
+
+  setOriginal(key: string, original: Original) {
+    this.deleteOriginal(key);
+    if (original.data.length > this.maxBytes) {
+      return;
+    }
+    this.originals.set(key, original);
+    this.originalBytes += original.data.length;
+    this.trim();
+  }
+
+  private deleteVariant(key: string) {
+    this.variantBytes -= this.variants.get(key)?.bytes ?? 0;
+    this.variants.delete(key);
+  }
+
+  private deleteOriginal(key: string) {
+    this.originalBytes -= this.originals.get(key)?.data.length ?? 0;
+    this.originals.delete(key);
+  }
+
+  private trim() {
+    for (const key of this.originals.keys()) {
+      if (this.variantBytes + this.originalBytes <= this.maxBytes) {
+        return;
+      }
+      this.deleteOriginal(key);
+    }
+    for (const [key, variant] of this.variants) {
+      if (this.variantBytes + this.originalBytes <= this.maxBytes) {
+        return;
+      }
+      if (variant.bytes !== undefined) {
+        this.deleteVariant(key);
       }
     }
-    return size;
   }
 }

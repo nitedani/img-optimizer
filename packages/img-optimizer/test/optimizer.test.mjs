@@ -2,6 +2,19 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import sharp from 'sharp';
 import { createOptimizer } from 'img-optimizer/server';
+import { ImageCache } from '../lib/server/cache.js';
+
+const noisyJpeg = (width, height) =>
+  sharp({
+    create: {
+      width,
+      height,
+      channels: 3,
+      noise: { type: 'gaussian', mean: 128, sigma: 40 },
+    },
+  })
+    .jpeg()
+    .toBuffer();
 
 test('an EXIF-rotated or mirrored photo comes out upright in both formats', async () => {
   const jpeg = await sharp({
@@ -259,4 +272,127 @@ test('a failed load is not kept, so the next request loads again', async t => {
   assert.equal((await request()).status, 200);
   assert.equal((await request(640)).status, 200);
   assert.equal(loads, 2);
+});
+
+test('a second width of an image reuses the original read for the first', async () => {
+  const jpeg = await noisyJpeg(1200, 800);
+  let loads = 0;
+  const optimize = createOptimizer();
+  for (const size of [360, 640, 1024]) {
+    const { status } = await optimize({
+      url: `/img-optimizer?src=/photo.jpg&size=${size}`,
+      headers: { accept: 'image/webp' },
+      loadStaticAsset: () => {
+        loads++;
+        return jpeg;
+      },
+    });
+    assert.equal(status, 200);
+  }
+  assert.equal(loads, 1);
+});
+
+test('simultaneous requests share one read and one encode per variant', async t => {
+  const jpeg = await noisyJpeg(1200, 800);
+  const encodes = t.mock.method(sharp.prototype, 'toBuffer');
+  let loads = 0;
+  const optimize = createOptimizer();
+  const answers = await Promise.all(
+    [360, 360, 360, 360, 640, 640].map(size =>
+      optimize({
+        url: `/img-optimizer?src=/photo.jpg&size=${size}`,
+        headers: { accept: 'image/webp' },
+        loadStaticAsset: async () => {
+          loads++;
+          return jpeg;
+        },
+      })
+    )
+  );
+  assert.deepEqual(
+    answers.map(r => r.status),
+    [200, 200, 200, 200, 200, 200]
+  );
+  assert.equal(loads, 1);
+  assert.equal(encodes.mock.callCount(), 2);
+});
+
+test('a gallery larger than cacheSizeMb keeps every thumbnail and drops originals', async t => {
+  const photos = await Promise.all(
+    Array.from({ length: 24 }, () => noisyJpeg(1000, 700))
+  );
+  const encodes = t.mock.method(sharp.prototype, 'toBuffer');
+  let loads = 0;
+  const optimize = createOptimizer({ cacheSizeMb: 1 });
+  const view = (size = 360, indexes = photos.keys()) =>
+    Promise.all(
+      [...indexes].map(i =>
+        optimize({
+          url: `/img-optimizer?src=/photo-${i}.jpg&size=${size}`,
+          headers: { accept: 'image/webp' },
+          loadStaticAsset: () => {
+            loads++;
+            return photos[i];
+          },
+        })
+      )
+    );
+  for (const i of photos.keys()) {
+    assert.equal((await view(360, [i]))[0].status, 200);
+  }
+  assert.deepEqual([loads, encodes.mock.callCount()], [24, 24]);
+  assert.ok((await view()).every(r => r.status === 200));
+  assert.deepEqual([loads, encodes.mock.callCount()], [24, 24]);
+  await view(640, [23]);
+  assert.equal(loads, 24);
+  await view(640, [0]);
+  assert.equal(loads, 25);
+});
+
+test('the cache stays within its bytes and evicts originals before variants', async () => {
+  const cache = new ImageCache(100);
+  const bytes = () => cache.variantBytes + cache.originalBytes;
+  const encoded = size => async () => ({ data: Buffer.alloc(size) });
+  const original = size => ({
+    version: '',
+    data: Buffer.alloc(size),
+    originalWidth: 1,
+  });
+  cache.setOriginal('a', original(40));
+  await cache.variant('a 1', '', 1, encoded(20));
+  cache.setOriginal('b', original(40));
+  await cache.variant('b 1', '', 1, encoded(20));
+  assert.deepEqual(
+    [cache.original('a', ''), !!cache.original('b', ''), bytes()],
+    [undefined, true, 80]
+  );
+  await cache.variant('c 1', '', 1, encoded(30));
+  await cache.variant('d 1', '', 1, encoded(30));
+  assert.deepEqual(
+    [
+      cache.original('b', ''),
+      ['a 1', 'b 1', 'c 1', 'd 1'].map(k => cache.held(k)),
+      bytes(),
+    ],
+    [undefined, ['', '', '', ''], 100]
+  );
+  await cache.variant('e 1', '', 1, encoded(30));
+  assert.deepEqual(
+    ['a 1', 'b 1', 'c 1', 'e 1'].map(k => cache.held(k)),
+    [undefined, undefined, '', '']
+  );
+  assert.equal(bytes(), 90);
+  const oversized = await cache.variant('f 1', '', 1, encoded(101));
+  assert.equal(oversized.data.length, 101);
+  cache.setOriginal('f', original(101));
+  assert.deepEqual(
+    [cache.held('f 1'), cache.original('f', ''), cache.held('e 1'), bytes()],
+    [undefined, undefined, '', 90]
+  );
+  await assert.rejects(
+    cache.variant('g 1', '', 1, async () => {
+      throw new Error('corrupt image');
+    })
+  );
+  assert.equal(cache.held('g 1'), undefined);
 });
