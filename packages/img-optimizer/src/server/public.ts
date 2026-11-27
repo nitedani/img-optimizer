@@ -1,10 +1,15 @@
-import { EncodedVariant, ImageCache, Original } from './cache.js';
+import {
+  createInFlight,
+  EncodedVariant,
+  ImageCache,
+  Original,
+} from './cache.js';
 import { openImage } from './image.js';
 import { loadBuffer } from './loadBuffer.js';
 import { parseRequest, pickEncoding } from './request.js';
 import { Config, OptimizerResult, StaticAssetLoader } from './types.js';
 
-/** An original with its upright width, which each requested width meets. */
+/** An original with its upright width, which a requested width is checked against. */
 interface SizedOriginal extends Original {
   width: number;
 }
@@ -19,11 +24,11 @@ const badRequest = (body = 'Bad request'): OptimizerResult => ({
 });
 
 /**
- * Answers a `?src=` request as 0.0.4 does: the image of an allowed domain,
- * kept by browsers for good, or a redirect to its own width when narrower.
+ * Answers a `?src=` request: the image of an allowed domain, kept by
+ * browsers for good, or a redirect to its own width when narrower.
  */
 export const publicOptimizer = (config: Config, cache: ImageCache) => {
-  const inFlightReads = new Map<string, Promise<SizedOriginal>>();
+  const shareRead = createInFlight<SizedOriginal>();
 
   return async (
     requestUrl: string | URL,
@@ -69,22 +74,21 @@ export const publicOptimizer = (config: Config, cache: ImageCache) => {
       );
       return { image, width: await image.width() };
     };
-    let loadedOriginal: SizedOriginal | undefined;
-    let ownsRead = false;
+    let original: SizedOriginal | undefined;
+    let releaseRead = () => {};
     // Runs when the variant is not cached: a cached one needs no original.
     const sizeImage = async (): Promise<EncodedVariant> => {
-      let original = cache.original<SizedOriginal>(originalKey);
-      // Other widths share this read until the request that started it settles.
-      ownsRead = !original && !inFlightReads.has(originalKey);
-      if (ownsRead) {
-        inFlightReads.set(originalKey, readOriginal());
+      original = cache.original<SizedOriginal>(originalKey);
+      if (!original) {
+        // Other widths share this read until the request that started it settles.
+        const read = shareRead(originalKey, readOriginal);
+        releaseRead = read.release;
+        original = await read.pending;
       }
-      original ??= await inFlightReads.get(originalKey)!;
       if (size !== original.width && !config.sizes.includes(size)) {
         cache.setOriginal(originalKey, original);
         throw new SizeError();
       }
-      loadedOriginal = original;
       if (size > original.width) {
         return { redirectTo: original.width };
       }
@@ -100,8 +104,8 @@ export const publicOptimizer = (config: Config, cache: ImageCache) => {
         sizeImage
       );
       // Kept in the space the variants leave, so only once this one is counted.
-      if (loadedOriginal) {
-        cache.setOriginal(originalKey, loadedOriginal);
+      if (original) {
+        cache.setOriginal(originalKey, original);
       }
     } catch (error) {
       if (!(error instanceof SizeError)) {
@@ -109,9 +113,7 @@ export const publicOptimizer = (config: Config, cache: ImageCache) => {
       }
       return badRequest();
     } finally {
-      if (ownsRead) {
-        inFlightReads.delete(originalKey);
-      }
+      releaseRead();
     }
     if ('data' in image) {
       return {

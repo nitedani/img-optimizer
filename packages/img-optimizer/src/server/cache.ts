@@ -20,6 +20,27 @@ const touch = <T>(map: Map<string, T>, key: string, value: T) => {
   map.set(key, value);
 };
 
+/** Shares one pending value per key until the call that started it releases it. */
+export const createInFlight = <T>() => {
+  const inFlight = new Map<string, Promise<T>>();
+  return (key: string, start: () => Promise<T>) => {
+    const shared = inFlight.get(key);
+    if (shared) {
+      return { pending: shared, release: () => {} };
+    }
+    const pending = start();
+    inFlight.set(key, pending);
+    return {
+      pending,
+      release: () => {
+        if (inFlight.get(key) === pending) {
+          inFlight.delete(key);
+        }
+      },
+    };
+  };
+};
+
 /**
  * Encoded variants and the originals they are encoded from, least recently
  * used first, sharing one byte budget; originals are evicted before variants

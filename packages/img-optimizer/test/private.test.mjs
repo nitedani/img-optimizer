@@ -259,6 +259,30 @@ test('a photo is read and opened once for all its widths and formats', async t =
   assert.equal(opens.mock.callCount(), 1);
 });
 
+test('a width asked for while another encodes shares its read', async t => {
+  const store = await photoStore();
+  const opens = t.mock.method(sharp.prototype, 'rotate');
+  const toBuffer = sharp.prototype.toBuffer;
+  let encodeStarted;
+  const encoding = new Promise(resolve => (encodeStarted = resolve));
+  t.mock.method(sharp.prototype, 'toBuffer', function (...args) {
+    encodeStarted();
+    return toBuffer.apply(this, args);
+  });
+  const optimize = createOptimizer({ load: store.load });
+  const request = (size, accept) =>
+    optimize({ url: `/photos/5/image?size=${size}`, headers: { accept } });
+  const first = request(1600, 'image/avif');
+  await encoding;
+  const answers = await Promise.all([first, request(640, 'image/webp')]);
+  assert.deepEqual(
+    answers.map(r => r.status),
+    [200, 200]
+  );
+  assert.deepEqual(store.calls, [['/photos/5/image', undefined]]);
+  assert.equal(opens.mock.callCount(), 1);
+});
+
 test('a replaced or deleted photo never answers from its cached original', async () => {
   const store = await photoStore();
   const optimize = createOptimizer({ load: store.load });
