@@ -97,7 +97,9 @@ export class ImageCache {
 
   setOriginal(key: string, original: Original, reserveBytes = 0) {
     this.deleteOriginal(key);
-    if (original.data.length + reserveBytes > this.maxBytes) {
+    // An oversized variant is never kept, so it reserves nothing.
+    const reserve = reserveBytes > this.maxBytes ? 0 : reserveBytes;
+    if (original.data.length + reserve > this.maxBytes) {
       return;
     }
     this.originals.set(key, original);

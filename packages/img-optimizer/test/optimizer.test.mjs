@@ -526,6 +526,53 @@ test('an original too big to keep beside its variant never evicts an older one',
   assert.deepEqual(reads, ['/a.jpg', '/b.jpg']);
 });
 
+test('an encode too big to cache keeps the original it came from', async () => {
+  const cache = new ImageCache(100);
+  const original = size => ({ data: Buffer.alloc(size), originalWidth: 1 });
+  cache.setOriginal('a', original(40));
+  cache.setOriginal('a', original(40), 101);
+  cache.setOriginal('b', original(101), 101);
+  assert.deepEqual(
+    [!!cache.original('a'), cache.original('b'), cache.bytes],
+    [true, undefined, 40]
+  );
+
+  const photo = await sharp({
+    create: {
+      width: 2000,
+      height: 1000,
+      channels: 3,
+      noise: { type: 'gaussian', mean: 128, sigma: 40 },
+    },
+  })
+    .jpeg({ quality: 30 })
+    .toBuffer();
+  const request = (optimize, query) =>
+    optimize({
+      url: `/img-optimizer?src=/photo.jpg&${query}`,
+      headers: { accept: 'image/webp' },
+    });
+  const queries = ['size=360', 'size=1920&quality=100', 'size=640'];
+  const measure = createOptimizer({ loadStaticAsset: () => photo });
+  const [small, wide, medium] = await Promise.all(
+    queries.map(async query => (await request(measure, query)).body.length)
+  );
+  const cacheBytes = photo.length + small + medium + 1024;
+  assert.ok(wide > cacheBytes);
+  let loads = 0;
+  const optimize = createOptimizer({
+    cacheSizeMb: cacheBytes / 1024 / 1024,
+    loadStaticAsset: () => {
+      loads++;
+      return photo;
+    },
+  });
+  for (const query of queries) {
+    assert.equal((await request(optimize, query)).status, 200);
+  }
+  assert.equal(loads, 1);
+});
+
 test('load serves the image at the pathname, given as an option or per call', async () => {
   for (const via of ['options', 'per call']) {
     const store = await photoStore();
