@@ -24,19 +24,8 @@ export const parseHeaders = (
   return result;
 };
 
-const parsePort = (port: string | number | undefined) => {
-  if (typeof port === 'string') {
-    try {
-      return parseInt(port, 10);
-    } catch (error) {
-      return undefined;
-    }
-  } else if (typeof port === 'number') {
-    return port;
-  } else {
-    return undefined;
-  }
-};
+const parsePort = (port: string | number | undefined) =>
+  typeof port === 'string' ? parseInt(port, 10) : port;
 
 export const parseUrl = (url: string | URL) => {
   if (url instanceof URL) {

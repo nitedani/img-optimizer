@@ -49,7 +49,7 @@ export class ImageCache {
     return variant?.etag === etag ? variant.quality : undefined;
   }
 
-  /** Resolves once the variant is counted and the cache trimmed to its bytes. */
+  /** Resolves after the cache has settled this encode: counted and trimmed, or dropped. */
   variant<T extends EncodedVariant>(
     key: string,
     etag: string,

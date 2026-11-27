@@ -33,12 +33,7 @@ export const loadBuffer = async ({
       );
     }
 
-    const bufferOrArrayBuffer = await loadStaticAsset(src);
-    if (bufferOrArrayBuffer instanceof ArrayBuffer) {
-      return Buffer.from(bufferOrArrayBuffer);
-    } else {
-      return bufferOrArrayBuffer;
-    }
+    return loadStaticAsset(src);
   }
 
   const res = await got(src);
