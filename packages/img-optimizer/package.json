@@ -13,7 +13,7 @@
   },
   "scripts": {
     "build": "rimraf lib && tsc -b",
-    "test": "node --test"
+    "test": "node --test test/optimizer.test.mjs"
   },
   "exports": {
     ".": "./lib/index.js",

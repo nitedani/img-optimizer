@@ -187,11 +187,7 @@ test('a public answer keeps its headers, and each load answer gets its own', asy
 });
 
 test('a narrower image redirects to its width on the same path', async () => {
-  const jpeg = await sharp({
-    create: { width: 1200, height: 800, channels: 3, background: 'blue' },
-  })
-    .jpeg()
-    .toBuffer();
+  const jpeg = await solidJpeg(1200, 800, 'blue');
   const optimize = createOptimizer();
   const query = '?src=/photo.jpg&size=1600';
   const requests = [
@@ -203,6 +199,10 @@ test('a narrower image redirects to its width on the same path', async () => {
     [
       new URL('/gallery/img-optimizer' + query, 'http://localhost'),
       '/gallery/img-optimizer',
+    ],
+    [
+      'http://localhost//evil.com/img-optimizer' + query,
+      '/evil.com/img-optimizer',
     ],
   ];
   const answers = await Promise.all(
@@ -221,16 +221,7 @@ test('a narrower image redirects to its width on the same path', async () => {
 });
 
 test('a redirect keeps the quality asked for, even with another cached', async () => {
-  const jpeg = await sharp({
-    create: {
-      width: 1200,
-      height: 800,
-      channels: 3,
-      noise: { type: 'gaussian', mean: 128, sigma: 40 },
-    },
-  })
-    .jpeg()
-    .toBuffer();
+  const jpeg = await noisyJpeg(1200, 800);
   const request = (optimize, url) =>
     optimize({
       url,
@@ -257,11 +248,7 @@ test('a redirect keeps the quality asked for, even with another cached', async (
 });
 
 test('a redirect keeps an src that has its own query', async () => {
-  const jpeg = await sharp({
-    create: { width: 1200, height: 800, channels: 3, background: 'blue' },
-  })
-    .jpeg()
-    .toBuffer();
+  const jpeg = await solidJpeg(1200, 800, 'blue');
   const src = '/photos/6?v=1&w=2';
   const { status, headers } = await createOptimizer()({
     url: `/photos/6/image?src=${encodeURIComponent(src)}&size=1600`,
@@ -299,11 +286,7 @@ test('a redirect counts against cacheSizeMb, so 0 keeps none', async () => {
 
 test('a failed load is not kept, so the next request loads again', async t => {
   t.mock.method(console, 'error', () => {});
-  const jpeg = await sharp({
-    create: { width: 720, height: 500, channels: 3, background: 'blue' },
-  })
-    .jpeg()
-    .toBuffer();
+  const jpeg = await solidJpeg(720, 500, 'blue');
   let loads = 0;
   let failing = true;
   const loadStaticAsset = async () => {
@@ -771,6 +754,38 @@ test('private routes mounted at different paths serve their own images', async (
   assert.deepEqual(pixels, [
     [0, 0, 255],
     [255, 0, 0],
+  ]);
+});
+
+test('a colon in the path or etag never shares a read with another pair', async () => {
+  const calls = [];
+  const optimize = createOptimizer({
+    load: async (src, etag) => {
+      calls.push([src, etag]);
+      return { etag };
+    },
+  });
+  const answers = await Promise.all(
+    [
+      ['/a:b', 'c'],
+      ['/a', 'b:c'],
+    ].map(([path, etag]) =>
+      optimize({
+        url: `${path}?size=640`,
+        headers: {
+          accept: 'image/webp',
+          'if-none-match': `W/"${etag}-webp-640-65"`,
+        },
+      })
+    )
+  );
+  assert.deepEqual(
+    answers.map(r => r.status),
+    [304, 304]
+  );
+  assert.deepEqual(calls, [
+    ['/a:b', 'c'],
+    ['/a', 'b:c'],
   ]);
 });
 

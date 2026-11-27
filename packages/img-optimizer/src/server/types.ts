@@ -55,7 +55,7 @@ export interface PrivateOptimizerInput extends OptimizerInput {
 }
 
 export interface PrivateOptimizerResult {
-  /** null on a 304; read-only cached buffer on a 200. */
+  /** null on a 304; treat returned Buffers as read-only. */
   body: Buffer | string | null;
   headers: Record<string, string>;
   status: number;

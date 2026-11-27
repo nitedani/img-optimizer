@@ -144,7 +144,7 @@ export function createOptimizer(
 
   const cache = new ImageCache(_optimizerOptions.cacheSizeMb * 1024 * 1024);
   const inFlightLoads = new Map<string, Promise<unknown>>();
-  // Concurrent misses for one source share its read.
+  // Concurrent misses for the same source and etag share one read.
   const readOnce = <T>(key: string, read: () => Promise<T>) => {
     let pending = inFlightLoads.get(key) as Promise<T> | undefined;
     if (!pending) {
@@ -157,8 +157,7 @@ export function createOptimizer(
   // Unlisted qualities share one slot, so a ?quality= sweep can't fill the cache.
   const pickEncoding = (
     headers: Record<string, string>,
-    requestedQuality: string | null,
-    strictQuality = false
+    requestedQuality: string | null
   ) => {
     const accept = headers['accept'] ?? 'webp';
     const { format, quality } =
@@ -166,9 +165,6 @@ export function createOptimizer(
       _optimizerOptions.formats[0];
     if (!requestedQuality) {
       return { format, quality, qualityKey: 'default' };
-    }
-    if (strictQuality && !/^\d+$/.test(requestedQuality)) {
-      return null;
     }
     const requested = parseInt(requestedQuality, 10);
     if (!(requested >= 1 && requested <= 100)) {
@@ -188,9 +184,11 @@ export function createOptimizer(
     const { pathname: src, searchParams } = parseUrl(url);
     const sizeStr = searchParams.get('size') ?? '';
     const size = Number(sizeStr);
-    const encoding = pickEncoding(headers, searchParams.get('quality'), true);
+    const qualityStr = searchParams.get('quality');
+    const encoding = pickEncoding(headers, qualityStr);
     if (
       !/^\d+$/.test(sizeStr) ||
+      (qualityStr && !/^\d+$/.test(qualityStr)) ||
       !_optimizerOptions.sizes.includes(size) ||
       !encoding
     ) {
@@ -198,16 +196,18 @@ export function createOptimizer(
     }
     const { format, quality, qualityKey } = encoding;
 
-    const key = `private:${src}:${format}:${size}:${qualityKey}`;
+    const key = JSON.stringify(['private', src, format, size, qualityKey]);
     const tags = entityTags(headers['if-none-match']);
-    // The image's etag in a tag this route sent for this variant.
+    // A candidate source etag from a browser tag matching this variant.
     const suffix = `-${format}-${size}-${quality}"`;
     const browserEtag = tags
       .filter(tag => tag.endsWith(suffix))
       .map(tag => tag.slice(1, -suffix.length))
       .find(etag => /^[^*\x00-\x1f\x7f]+$/.test(etag));
     const read = (etag?: string) =>
-      readOnce(`private:${src}:${etag ?? ''}`, async () => load(src, etag));
+      readOnce(JSON.stringify(['private', src, etag ?? '']), async () =>
+        load(src, etag)
+      );
     let loaded = await read(cache.etag(key) ?? browserEtag);
     if (!loaded) {
       return privateTextAnswer(404, 'Not found');
@@ -299,7 +299,7 @@ export function createOptimizer(
     }
     const { format, quality, qualityKey } = encoding;
 
-    const originalKey = `public:${src}`;
+    const originalKey = JSON.stringify(['public', src]);
     const readOriginal = async (): Promise<Original> => {
       const data = await loadBuffer({
         src,
@@ -318,7 +318,7 @@ export function createOptimizer(
     const sizeImage = async (): Promise<EncodedVariant> => {
       const { data, originalWidth } =
         cache.original(originalKey) ??
-        (await readOnce(`${originalKey}:`, readOriginal));
+        (await readOnce(originalKey, readOriginal));
       if (size !== originalWidth && !_optimizerOptions.sizes.includes(size)) {
         throw new SizeError();
       }
@@ -331,7 +331,7 @@ export function createOptimizer(
     let image: EncodedVariant;
     try {
       image = await cache.variant(
-        `${originalKey}:${format}:${size}:${qualityKey}`,
+        JSON.stringify(['public', src, format, size, qualityKey]),
         '',
         quality,
         sizeImage,
@@ -361,7 +361,7 @@ export function createOptimizer(
       status: 302,
       headers: {
         Location:
-          `${pathname}?src=${encodeURIComponent(src)}` +
+          `${pathname.replace(/^\/+/, '/')}?src=${encodeURIComponent(src)}` +
           `&size=${image.redirectTo}` +
           (qualityKey === 'default' ? '' : `&quality=${quality}`),
       },
