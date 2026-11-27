@@ -38,6 +38,32 @@ export const withMaybeLoad = async (url: string) => {
   fromOptions.body.length;
 };
 
+export const withUndefinedLoad = async (url: string) => {
+  const fromOptions: Buffer | string = (
+    await createOptimizer({ sizes: [640], load: undefined })({ url })
+  ).body;
+  const perCall: Buffer | string = (await optimize({ url, load: undefined }))
+    .body;
+  return [fromOptions.length, perCall.length];
+};
+
+type Options = Omit<
+  NonNullable<Parameters<typeof createOptimizer>[0]>,
+  'load'
+> & { load?: typeof load };
+type Input = Omit<Parameters<typeof optimize>[0], 'load'> & {
+  load?: typeof load;
+};
+
+export const withForwardedLoad = async (options: Options, input: Input) => {
+  const fromOptions = await createOptimizer(options)({ url: input.url });
+  // @ts-expect-error a 304 has no body
+  fromOptions.body.length;
+  const perCall = await optimize(input);
+  // @ts-expect-error a 304 has no body
+  perCall.body.length;
+};
+
 export const addSize = (
   options: NonNullable<Parameters<typeof createOptimizer>[0]>
 ) => options.sizes?.push(512);

@@ -95,13 +95,22 @@ const privateTextAnswer = (status: number, body: string) => ({
   },
 });
 
+// never for an argument without a loader, which the public overload takes.
+type LoadMayBeGiven<T> = T extends { load?: infer Load }
+  ? [Load] extends [undefined]
+    ? never
+    : unknown
+  : never;
+
 export function createOptimizer(
   optimizerOptions: OptimizerOptions & { load: ImageLoader }
 ): (
   input: OptimizerInput & { load?: ImageLoader }
 ) => Promise<PrivateOptimizerResult>;
-export function createOptimizer(
-  optimizerOptions: OptimizerOptions & { load: ImageLoader | undefined }
+export function createOptimizer<
+  T extends OptimizerOptions & { load?: ImageLoader }
+>(
+  optimizerOptions: T & LoadMayBeGiven<T>
 ): (
   input: OptimizerInput & { load?: ImageLoader }
 ) => Promise<OptimizerResult | PrivateOptimizerResult>;
@@ -109,9 +118,9 @@ export function createOptimizer(
   optimizerOptions?: OptimizerOptions & { load?: undefined }
 ): {
   (input: PrivateOptimizerInput): Promise<PrivateOptimizerResult>;
-  (input: OptimizerInput & { load: ImageLoader | undefined }): Promise<
-    OptimizerResult | PrivateOptimizerResult
-  >;
+  <T extends OptimizerInput & { load?: ImageLoader }>(
+    input: T & LoadMayBeGiven<T>
+  ): Promise<OptimizerResult | PrivateOptimizerResult>;
   (input: PublicOptimizerInput): Promise<OptimizerResult>;
 };
 export function createOptimizer(
