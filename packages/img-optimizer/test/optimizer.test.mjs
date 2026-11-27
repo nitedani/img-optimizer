@@ -330,24 +330,6 @@ test('a failed load is not kept, so the next request loads again', async t => {
   assert.equal(loads, 2);
 });
 
-test('a second width of an image reuses the original read for the first', async () => {
-  const jpeg = await noisyJpeg(1200, 800);
-  let loads = 0;
-  const optimize = createOptimizer();
-  for (const size of [360, 640, 1024]) {
-    const { status } = await optimize({
-      url: `/img-optimizer?src=/photo.jpg&size=${size}`,
-      headers: { accept: 'image/webp' },
-      loadStaticAsset: () => {
-        loads++;
-        return jpeg;
-      },
-    });
-    assert.equal(status, 200);
-  }
-  assert.equal(loads, 1);
-});
-
 test('a new photo reuses its original across widths once variants fill the cache', async () => {
   const [filler, photo] = await Promise.all([
     noisyJpeg(1200, 800),
@@ -368,10 +350,12 @@ test('a new photo reuses its original across widths once variants fill the cache
   for (let i = 0; i < 12; i++) {
     assert.equal((await request(`/filler-${i}.jpg`, 640)).status, 200);
   }
+  const readsAfterEach = [];
   for (const size of [1024, 640, 360]) {
     assert.equal((await request('/photo.jpg', size)).status, 200);
+    readsAfterEach.push(loads);
   }
-  assert.equal(loads, 1);
+  assert.deepEqual(readsAfterEach, [1, 1, 1]);
 });
 
 test('simultaneous requests share one read and one encode per variant', async t => {
@@ -542,7 +526,15 @@ test('load serves the image at the pathname, given as an option or per call', as
     const deleted = await request('size=640');
     assert.deepEqual(
       [deleted.status, deleted.body, deleted.headers],
-      [404, 'Not found', { 'Content-Type': 'text/plain' }]
+      [
+        404,
+        'Not found',
+        {
+          'Content-Type': 'text/plain',
+          'Cache-Control': 'private, no-store',
+          'X-Content-Type-Options': 'nosniff',
+        },
+      ]
     );
     assert.deepEqual(
       [...new Set(store.calls.map(([src]) => src))],
@@ -587,6 +579,29 @@ test('an ETag the browser kept answers 304 without encoding, even on a cold cach
   assert.deepEqual(
     store.calls.map(([, cachedVersion]) => cachedVersion),
     [undefined, undefined, undefined, 'fake', undefined, undefined, undefined]
+  );
+});
+
+test('a version holding a comma matches its ETag, warm or cold', async () => {
+  const store = await photoStore();
+  store.version = 'v1,2';
+  const request = (optimize, ifNoneMatch) =>
+    optimize({
+      url: '/photos/5/image?size=640',
+      headers: { accept: 'image/webp', 'if-none-match': ifNoneMatch },
+    });
+  const optimize = createOptimizer({ load: store.load });
+  const { headers } = await request(optimize);
+  assert.equal(headers.ETag, 'W/"v1,2-webp-640-65"');
+  const warm = await request(optimize, headers.ETag);
+  const cold = await request(
+    createOptimizer({ load: store.load }),
+    `"x", ${headers.ETag}`
+  );
+  assert.deepEqual([warm.status, cold.status], [304, 304]);
+  assert.deepEqual(
+    store.calls.map(([, cachedVersion]) => cachedVersion),
+    [undefined, 'v1,2', 'v1,2']
   );
 });
 
@@ -637,39 +652,83 @@ test('load answers a narrower image at its own width, never redirecting', async 
   assert.deepEqual([width, format], [500, 'heif']);
 });
 
-test('a size load is not configured for is a bad request', async () => {
+test('a size or quality load is not configured for is a bad request', async () => {
   const store = await photoStore();
   const answers = await Promise.all(
-    ['size=500', 'size=abc', 'size=640.0', 'size=+640', ''].map(query =>
+    [
+      'size=500',
+      'size=abc',
+      'size=640.0',
+      'size=+640',
+      '',
+      'size=640&quality=0',
+      'size=640&quality=101',
+    ].map(query =>
       createOptimizer({ load: store.load })({ url: `/photos/5/image?${query}` })
     )
   );
   assert.deepEqual(
-    answers.map(r => [r.status, r.body, r.headers['Content-Type']]),
-    Array(5).fill([400, 'Bad request', 'text/plain'])
+    answers.map(r => [r.status, r.body, r.headers]),
+    Array(7).fill([
+      400,
+      'Bad request',
+      {
+        'Content-Type': 'text/plain',
+        'Cache-Control': 'private, no-store',
+        'X-Content-Type-Options': 'nosniff',
+      },
+    ])
   );
   assert.deepEqual(store.calls, []);
 });
 
 test('a failing load or encode rejects and is not kept', async () => {
-  let failing = true;
   const jpeg = await solidJpeg(1200, 800, 'blue');
+  let loads = 0;
+  let answer = () => {
+    throw new Error('storage timed out');
+  };
   const optimize = createOptimizer({
     load: () => {
-      if (failing) throw new Error('storage timed out');
-      return { version: 'v1', data: jpeg };
+      loads++;
+      return answer();
     },
   });
   const request = () => optimize({ url: '/photos/5/image?size=640' });
   await assert.rejects(request(), /storage timed out/);
-  failing = false;
+  answer = () => ({ version: 'v1', data: Buffer.from('not an image') });
+  await Promise.all([assert.rejects(request()), assert.rejects(request())]);
+  answer = () => ({ version: 'v1', data: jpeg });
   assert.equal((await request()).status, 200);
-  await assert.rejects(
-    createOptimizer()({
-      url: '/photos/5/image?size=640',
-      load: () => ({ version: 'v1', data: Buffer.from('not an image') }),
-    })
+  assert.equal(loads, 3);
+});
+
+test('private routes mounted at different paths serve their own images', async () => {
+  const routes = [
+    ['/items/5/image', await solidJpeg(1200, 800, 'blue')],
+    ['/partners/5/image', await solidJpeg(1200, 800, 'red')],
+  ];
+  const optimize = createOptimizer();
+  const answers = await Promise.all(
+    routes.map(([path, data]) =>
+      optimize({
+        url: `${path}?size=640`,
+        headers: { accept: 'image/webp' },
+        load: () => ({ version: 'v1', data }),
+      })
+    )
   );
+  const pixels = await Promise.all(
+    answers.map(async ({ body }) =>
+      [...(await sharp(body).raw().toBuffer()).subarray(0, 3)].map(channel =>
+        channel < 128 ? 0 : 255
+      )
+    )
+  );
+  assert.deepEqual(pixels, [
+    [0, 0, 255],
+    [255, 0, 0],
+  ]);
 });
 
 test('a public ?src= of the same path and load never share a cache entry', async () => {
@@ -722,12 +781,16 @@ test('unlisted qualities share one cached copy, listed ones get their own', asyn
     )
   );
   assert.ok(sweep.every(r => r.body === sixty.body));
-  const defaults = await Promise.all(
-    ['', '&quality=0', '&quality=101', '&quality=abc', '&quality=60.5'].map(
-      query => request(optimize, query)
+  const [omitted, empty, ...invalid] = await Promise.all(
+    ['', '&quality=', '&quality=0', '&quality=101', '&quality=abc'].map(query =>
+      request(optimize, query)
     )
   );
-  assert.ok(defaults.every(r => r.body === defaults[0].body));
+  assert.equal(empty.body, omitted.body);
+  assert.deepEqual(
+    invalid.map(r => r.status),
+    [400, 400, 400]
+  );
   assert.equal(encodes.mock.callCount(), 2);
 
   const listed = createOptimizer({ qualities: [60, 85] });

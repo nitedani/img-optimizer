@@ -5,21 +5,14 @@ export const parseHeaders = (
   headers: Record<string, string | string[] | undefined> | Headers
 ): Record<string, string> => {
   const result: Record<string, string> = {};
+  const add = (value: string | string[] | undefined, key: string) => {
+    result[key.toLowerCase()] = Array.isArray(value) ? value[0] : value || '';
+  };
   if (typeof headers.forEach === 'function') {
-    headers.forEach((value, key) => {
-      if (Array.isArray(value)) {
-        result[key.toLowerCase()] = value[0];
-      } else {
-        result[key.toLowerCase()] = value || '';
-      }
-    });
+    headers.forEach(add);
   } else {
     for (const [key, value] of Object.entries(headers)) {
-      if (Array.isArray(value)) {
-        result[key.toLowerCase()] = value[0];
-      } else {
-        result[key.toLowerCase()] = value || '';
-      }
+      add(value, key);
     }
   }
 

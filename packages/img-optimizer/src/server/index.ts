@@ -78,23 +78,21 @@ const parseRequest = (url: string | URL, headers: Record<string, string>) => {
   };
 };
 
-const etagTokens = (ifNoneMatch?: string) =>
-  ifNoneMatch?.split(',').map(token => token.trim().replace(/^W\//, '')) ?? [];
+// The quoted tags of an If-None-Match list, which may hold commas, weak or not.
+const entityTags = (ifNoneMatch = '') =>
+  Array.from(
+    ifNoneMatch.matchAll(/(?:^|,)\s*(?:W\/)?("[^"]*")(?=\s*(?:,|$))/g),
+    match => match[1]
+  );
 
-const ifNoneMatchMatches = (ifNoneMatch: string | undefined, etag: string) =>
-  etagTokens(ifNoneMatch).includes(etag.replace(/^W\//, ''));
-
-/** The version in an ETag this route sent for the same variant, `"<version><suffix>`. */
-const versionIn = (ifNoneMatch: string | undefined, suffix: string) =>
-  etagTokens(ifNoneMatch)
-    .filter(tag => tag.startsWith('"') && tag.endsWith(suffix))
-    .map(tag => tag.slice(1, -suffix.length))
-    .find(version => /^[^"*\x00-\x1f\x7f]+$/.test(version));
-
-const textAnswer = (status: number, body: string) => ({
+const privateTextAnswer = (status: number, body: string) => ({
   status,
   body,
-  headers: { 'Content-Type': 'text/plain' },
+  headers: {
+    'Content-Type': 'text/plain',
+    'Cache-Control': 'private, no-store',
+    'X-Content-Type-Options': 'nosniff',
+  },
 });
 
 export function createOptimizer(
@@ -148,13 +146,12 @@ export function createOptimizer(
     const { format, quality } =
       _optimizerOptions.formats.find(f => accept.includes(f.format)) ||
       _optimizerOptions.formats[0];
-    const requested = Number(requestedQuality);
-    if (
-      !/^\d+$/.test(requestedQuality ?? '') ||
-      requested < 1 ||
-      requested > 100
-    ) {
+    if (!requestedQuality) {
       return { format, quality, qualityKey: 'default' };
+    }
+    const requested = parseInt(requestedQuality, 10);
+    if (!(requested >= 1 && requested <= 100)) {
+      return null;
     }
     const qualityKey = _optimizerOptions.qualities?.includes(requested)
       ? String(requested)
@@ -170,39 +167,44 @@ export function createOptimizer(
     const { pathname: src, searchParams } = parseUrl(url);
     const sizeStr = searchParams.get('size') ?? '';
     const size = Number(sizeStr);
-    if (!/^\d+$/.test(sizeStr) || !_optimizerOptions.sizes.includes(size)) {
-      return textAnswer(400, 'Bad request');
+    const encoding = pickEncoding(headers, searchParams.get('quality'));
+    if (
+      !/^\d+$/.test(sizeStr) ||
+      !_optimizerOptions.sizes.includes(size) ||
+      !encoding
+    ) {
+      return privateTextAnswer(400, 'Bad request');
     }
-    const { format, quality, qualityKey } = pickEncoding(
-      headers,
-      searchParams.get('quality')
-    );
+    const { format, quality, qualityKey } = encoding;
 
     const key = `private:${src}:${format}:${size}:${qualityKey}`;
-    const ifNoneMatch = headers['if-none-match'];
+    const tags = entityTags(headers['if-none-match']);
+    // The version in a tag this route sent for this variant.
+    const suffix = `-${format}-${size}-${quality}"`;
+    const browserVersion = tags
+      .filter(tag => tag.endsWith(suffix))
+      .map(tag => tag.slice(1, -suffix.length))
+      .find(version => /^[^*\x00-\x1f\x7f]+$/.test(version));
     const read = (cachedVersion?: string) =>
       readOnce(`private:${src}:${cachedVersion ?? ''}`, async () =>
         load(src, cachedVersion)
       );
-    let loaded = await read(
-      cache.cachedVersion(key) ??
-        versionIn(ifNoneMatch, `-${format}-${size}-${quality}"`)
-    );
+    let loaded = await read(cache.cachedVersion(key) ?? browserVersion);
     if (!loaded) {
-      return textAnswer(404, 'Not found');
+      return privateTextAnswer(404, 'Not found');
     }
-    const etagOf = (version: string) =>
-      `W/"${version}-${format}-${size}-${
+    const tagOf = (version: string) =>
+      `"${version}-${format}-${size}-${
         cache.quality(key, version) ?? quality
       }"`;
     if (
       loaded.data === undefined &&
       cache.cachedVersion(key) !== loaded.version &&
-      !ifNoneMatchMatches(ifNoneMatch, etagOf(loaded.version))
+      !tags.includes(tagOf(loaded.version))
     ) {
       loaded = await read();
       if (!loaded) {
-        return textAnswer(404, 'Not found');
+        return privateTextAnswer(404, 'Not found');
       }
       if (loaded.data === undefined) {
         throw new Error(`load returned no data for ${src}`);
@@ -210,14 +212,14 @@ export function createOptimizer(
     }
     const { version, data } = loaded;
     const answerHeaders: Record<string, string> = {
-      ETag: etagOf(version),
+      ETag: `W/${tagOf(version)}`,
       'Cache-Control':
         searchParams.get('v') === version
           ? 'private, max-age=86400'
           : 'private, no-cache',
       Vary: 'Accept',
     };
-    if (ifNoneMatchMatches(ifNoneMatch, answerHeaders.ETag)) {
+    if (tags.includes(tagOf(version))) {
       return { status: 304, body: null, headers: answerHeaders };
     }
     const image = await cache.variant(key, version, quality, async () => ({
@@ -273,10 +275,11 @@ export function createOptimizer(
       }
     }
 
-    const { format, quality, qualityKey } = pickEncoding(
-      headers,
-      requestedQuality
-    );
+    const encoding = pickEncoding(headers, requestedQuality);
+    if (!encoding) {
+      return { status: 400, body: 'Bad request', headers: {} };
+    }
+    const { format, quality, qualityKey } = encoding;
 
     const originalKey = `public:${src}`;
     const readOriginal = async (): Promise<Original> => {
