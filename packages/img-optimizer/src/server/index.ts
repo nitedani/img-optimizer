@@ -1,6 +1,7 @@
 import { defu } from 'defu';
 import { EncodedVariant, ImageCache, Original } from './cache.js';
 import { openImage } from './image.js';
+import { privateOptimizer } from './private.js';
 import {
   OptimizerOptions,
   Format,
@@ -12,31 +13,9 @@ import {
   PrivateOptimizerResult,
 } from './types.js';
 import { loadBuffer } from './loadBuffer.js';
-import {
-  parseHeaders,
-  parseRequest,
-  parseUrl,
-  pickEncoding,
-} from './request.js';
+import { parseHeaders, parseRequest, pickEncoding } from './request.js';
 
 class SizeError extends Error {}
-
-// The quoted tags of an If-None-Match list, which may hold commas, weak or not.
-const entityTags = (ifNoneMatch = '') =>
-  Array.from(
-    ifNoneMatch.matchAll(/(?:^|,)\s*(?:W\/)?("[^"]*")(?=\s*(?:,|$))/g),
-    match => match[1]
-  );
-
-const privateTextAnswer = (status: number, body: string) => ({
-  status,
-  body,
-  headers: {
-    'Content-Type': 'text/plain',
-    'Cache-Control': 'private, no-store',
-    'X-Content-Type-Options': 'nosniff',
-  },
-});
 
 export function createOptimizer(
   optimizerOptions: OptimizerOptions & { load: ImageLoader }
@@ -66,94 +45,7 @@ export function createOptimizer(optimizerOptions?: OptimizerOptions) {
 
   const cache = new ImageCache(_optimizerOptions.cacheSizeMb * 1024 * 1024);
   const inFlightLoads = new Map<string, Promise<unknown>>();
-  // Concurrent misses for the same source and etag share one read.
-  const readOnce = <T>(key: string, read: () => Promise<T>) => {
-    let pending = inFlightLoads.get(key) as Promise<T> | undefined;
-    if (!pending) {
-      pending = read().finally(() => inFlightLoads.delete(key));
-      inFlightLoads.set(key, pending);
-    }
-    return pending;
-  };
-
-  const optimizePrivate = async (
-    url: string | URL,
-    headers: Record<string, string>,
-    load: ImageLoader
-  ): Promise<PrivateOptimizerResult> => {
-    const { pathname: src, searchParams } = parseUrl(url);
-    const sizeStr = searchParams.get('size') ?? '';
-    const size = Number(sizeStr);
-    const qualityStr = searchParams.get('quality');
-    const encoding = pickEncoding(_optimizerOptions, headers, qualityStr);
-    if (
-      !/^\d+$/.test(sizeStr) ||
-      (qualityStr && !/^\d+$/.test(qualityStr)) ||
-      !_optimizerOptions.sizes.includes(size) ||
-      !encoding
-    ) {
-      return privateTextAnswer(400, 'Bad request');
-    }
-    const { format, quality, qualityKey } = encoding;
-
-    const key = JSON.stringify(['private', src, format, size, qualityKey]);
-    const tags = entityTags(headers['if-none-match']);
-    const matchesAny = headers['if-none-match']?.trim() === '*';
-    // A candidate source etag from a browser tag matching this variant.
-    const suffix = `-${format}-${size}-${quality}"`;
-    const browserEtag = tags
-      .filter(tag => tag.endsWith(suffix))
-      .map(tag => tag.slice(1, -suffix.length))
-      .find(etag => /^[^*\x00-\x1f\x7f]+$/.test(etag));
-    const read = (etag?: string) =>
-      readOnce(JSON.stringify(['private', src, etag ?? null]), async () =>
-        load(src, etag)
-      );
-    let loaded = await read(cache.etag(key) ?? browserEtag);
-    if (!loaded) {
-      return privateTextAnswer(404, 'Not found');
-    }
-    const tagOf = (etag: string) =>
-      `"${etag}-${format}-${size}-${cache.quality(key, etag) ?? quality}"`;
-    if (
-      loaded.data === undefined &&
-      cache.etag(key) !== loaded.etag &&
-      !(matchesAny || tags.includes(tagOf(loaded.etag)))
-    ) {
-      loaded = await read();
-      if (!loaded) {
-        return privateTextAnswer(404, 'Not found');
-      }
-      if (loaded.data === undefined) {
-        throw new Error(`load returned no data for ${src}`);
-      }
-    }
-    const { etag, data } = loaded;
-    const answerHeaders: Record<string, string> = {
-      ETag: `W/${tagOf(etag)}`,
-      'Cache-Control':
-        searchParams.get('v') === etag
-          ? 'private, max-age=86400'
-          : 'private, no-cache',
-      Vary: 'Accept',
-    };
-    if (matchesAny || tags.includes(tagOf(etag))) {
-      cache.touchVariant(key, etag);
-      return { status: 304, body: null, headers: answerHeaders };
-    }
-    const image = await cache.variant(key, etag, quality, async () => ({
-      data: await openImage(data!).encode(format, size, quality),
-    }));
-    return {
-      status: 200,
-      body: (image as { data: Buffer }).data,
-      headers: {
-        ...answerHeaders,
-        'Content-Type': `image/${format}`,
-        'X-Content-Type-Options': 'nosniff',
-      },
-    };
-  };
+  const optimizePrivate = privateOptimizer(_optimizerOptions, cache);
 
   const optimize = async (
     optimizeOptions: OptimizerInput
