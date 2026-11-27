@@ -1,30 +1,6 @@
 import { StaticAssetLoader } from './types.js';
 import got from 'got';
 
-export const parseHeaders = (
-  headers: Record<string, string | string[] | undefined> | Headers
-): Record<string, string> => {
-  const result: Record<string, string> = {};
-  const add = (value: string | string[] | undefined, key: string) => {
-    const name = key.toLowerCase();
-    // Repeated If-None-Match values form one list, as Headers joins them.
-    result[name] = Array.isArray(value)
-      ? name === 'if-none-match'
-        ? value.join(', ')
-        : value[0]
-      : value || '';
-  };
-  if (typeof headers.forEach === 'function') {
-    headers.forEach(add);
-  } else {
-    for (const [key, value] of Object.entries(headers)) {
-      add(value, key);
-    }
-  }
-
-  return result;
-};
-
 export const loadBuffer = async ({
   src,
   headers,

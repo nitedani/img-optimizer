@@ -60,3 +60,8 @@ export interface PrivateOptimizerResult {
   headers: Record<string, string>;
   status: number;
 }
+
+/** The options with their defaults filled in. */
+export type Config = OptimizerOptions & { load?: ImageLoader } & Required<
+    Pick<OptimizerOptions, 'sizes' | 'cacheSizeMb' | 'formats' | 'domains'>
+  >;

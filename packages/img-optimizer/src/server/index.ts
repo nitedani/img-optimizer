@@ -11,72 +11,15 @@ import {
   PrivateOptimizerResult,
   PublicOptimizerInput,
 } from './types.js';
-import { loadBuffer, parseHeaders } from './utils.js';
+import { loadBuffer } from './loadBuffer.js';
+import {
+  parseHeaders,
+  parseRequest,
+  parseUrl,
+  pickEncoding,
+} from './request.js';
 
 class SizeError extends Error {}
-
-const parsePort = (port: string | number | undefined) => {
-  if (typeof port === 'string') {
-    try {
-      return parseInt(port, 10);
-    } catch (error) {
-      return undefined;
-    }
-  } else if (typeof port === 'number') {
-    return port;
-  } else {
-    return undefined;
-  }
-};
-
-const parseUrl = (url: string | URL) => {
-  if (url instanceof URL) {
-    return url;
-  }
-
-  const portMatch = /^[A-Z]+?:\/\/[A-Z\d\.-]{2,}\.[A-Z]{2,}:(\d{2,5})?/i.exec(
-    url
-  );
-  let port: number | undefined = undefined;
-  if (portMatch?.length === 2) {
-    port = parsePort(portMatch[1]);
-  }
-
-  const { pathname, search } = new URL(url, 'http://localhost');
-  const parsedUrl = new URL(
-    'http://localhost' + (port ? `:${port}` : '') + pathname + search
-  );
-
-  return parsedUrl;
-};
-
-const parseRequest = (url: string | URL, headers: Record<string, string>) => {
-  const parsedOriginalUrl = parseUrl(url);
-  const host = headers['host'] || parsedOriginalUrl.host;
-  const splitHost = host?.split(':');
-  const portFromHost = splitHost?.length === 2 ? splitHost[1] : undefined;
-  const port = parsePort(
-    parsedOriginalUrl.port || portFromHost || process.env.PORT
-  );
-
-  const protocol = port === 443 ? 'https://' : 'http://';
-
-  const src = parsedOriginalUrl.searchParams.get('src');
-  const sizeStr = parsedOriginalUrl.searchParams.get('size');
-  const qualityStr = parsedOriginalUrl.searchParams.get('quality');
-
-  const srcUrl =
-    src && new URL(src.startsWith('/') ? protocol + host + src : src);
-
-  return {
-    url: srcUrl || undefined,
-    pathname: parsedOriginalUrl.pathname,
-    port,
-    src,
-    size: sizeStr ? parseInt(sizeStr, 10) : undefined,
-    quality: qualityStr,
-  };
-};
 
 // The quoted tags of an If-None-Match list, which may hold commas, weak or not.
 const entityTags = (ifNoneMatch = '') =>
@@ -154,27 +97,6 @@ export function createOptimizer(
     return pending;
   };
 
-  // Omitted and unlisted qualities share a slot, bounding a ?quality= sweep.
-  const pickEncoding = (
-    headers: Record<string, string>,
-    requestedQuality: string | null
-  ) => {
-    const accept = headers['accept'] ?? 'webp';
-    const { format, quality: defaultQuality } =
-      _optimizerOptions.formats.find(f => accept.includes(f.format)) ||
-      _optimizerOptions.formats[0];
-    const quality = requestedQuality
-      ? parseInt(requestedQuality, 10)
-      : defaultQuality;
-    if (!(quality >= 1 && quality <= 100)) {
-      return null;
-    }
-    const qualityKey = _optimizerOptions.qualities?.includes(quality)
-      ? String(quality)
-      : 'default';
-    return { format, quality, qualityKey };
-  };
-
   const optimizePrivate = async (
     url: string | URL,
     headers: Record<string, string>,
@@ -184,7 +106,7 @@ export function createOptimizer(
     const sizeStr = searchParams.get('size') ?? '';
     const size = Number(sizeStr);
     const qualityStr = searchParams.get('quality');
-    const encoding = pickEncoding(headers, qualityStr);
+    const encoding = pickEncoding(_optimizerOptions, headers, qualityStr);
     if (
       !/^\d+$/.test(sizeStr) ||
       (qualityStr && !/^\d+$/.test(qualityStr)) ||
@@ -293,7 +215,7 @@ export function createOptimizer(
       }
     }
 
-    const encoding = pickEncoding(headers, requestedQuality);
+    const encoding = pickEncoding(_optimizerOptions, headers, requestedQuality);
     if (!encoding) {
       return { status: 400, body: 'Bad request', headers: {} };
     }
