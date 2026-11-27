@@ -101,9 +101,17 @@ export function createOptimizer(
   input: OptimizerInput & { load?: ImageLoader }
 ) => Promise<PrivateOptimizerResult>;
 export function createOptimizer(
+  optimizerOptions: OptimizerOptions & { load: ImageLoader | undefined }
+): (
+  input: OptimizerInput & { load?: ImageLoader }
+) => Promise<OptimizerResult | PrivateOptimizerResult>;
+export function createOptimizer(
   optimizerOptions?: OptimizerOptions & { load?: undefined }
 ): {
   (input: PrivateOptimizerInput): Promise<PrivateOptimizerResult>;
+  (input: OptimizerInput & { load: ImageLoader | undefined }): Promise<
+    OptimizerResult | PrivateOptimizerResult
+  >;
   (input: PublicOptimizerInput): Promise<OptimizerResult>;
 };
 export function createOptimizer(

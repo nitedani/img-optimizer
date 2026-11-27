@@ -8,8 +8,8 @@ export interface LoadedImage {
 }
 
 /**
- * Loads the image of a private route; `cachedVersion` is the version the
- * optimizer already has, and `null` answers 404.
+ * `cachedVersion` is the version in the cache or in the browser's
+ * If-None-Match; `null` answers 404.
  */
 export type ImageLoader = (
   src: string,
@@ -28,9 +28,9 @@ export interface OptimizerOptions {
   loadStaticAsset?: StaticAssetLoader;
   formats?: Format[];
   cacheSizeMb?: number;
-  sizes?: readonly number[];
+  sizes?: number[];
   /** `?quality=` values cached apart; other values share one cached copy. */
-  qualities?: readonly number[];
+  qualities?: number[];
   domains?: string[] | true;
 }
 
@@ -51,12 +51,11 @@ export interface PublicOptimizerInput extends OptimizerInput {
 }
 
 export interface PrivateOptimizerInput extends OptimizerInput {
-  /** Serves the image at the url's pathname, loaded by this instead of `?src=`. */
   load: ImageLoader;
 }
 
 export interface PrivateOptimizerResult {
-  /** null on a 304. */
+  /** null on a 304; read-only cached buffer on a 200. */
   body: Buffer | string | null;
   headers: Record<string, string>;
   status: number;

@@ -26,3 +26,18 @@ export const withLoad = async () => {
   // @ts-expect-error a 304 has no body
   fromOptions.body.length;
 };
+
+const maybeLoad = process.env.PRIVATE_IMAGES ? load : undefined;
+
+export const withMaybeLoad = async (url: string) => {
+  const perCall = await optimize({ url, load: maybeLoad });
+  // @ts-expect-error a 304 has no body
+  perCall.body.length;
+  const fromOptions = await createOptimizer({ load: maybeLoad })({ url });
+  // @ts-expect-error a 304 has no body
+  fromOptions.body.length;
+};
+
+export const addSize = (
+  options: NonNullable<Parameters<typeof createOptimizer>[0]>
+) => options.sizes?.push(512);
