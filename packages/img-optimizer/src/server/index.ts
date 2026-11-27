@@ -237,6 +237,7 @@ export function createOptimizer(
       Vary: 'Accept',
     };
     if (tags.includes(tagOf(etag))) {
+      cache.touchVariant(key, etag);
       return { status: 304, body: null, headers: answerHeaders };
     }
     const image = await cache.variant(key, etag, quality, async () => ({

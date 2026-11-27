@@ -462,10 +462,19 @@ test('the cache stays within its bytes, evicting older originals before variants
     [!!cache.original('h'), cache.etag('d 1'), cache.bytes],
     [true, undefined, 90]
   );
-  await cache.variant('h 2', '', 1, encoded(70), 'h');
+
+  const pair = new ImageCache(100);
+  await pair.variant('x 1', '', 1, encoded(20));
+  await pair.variant('y 1', '', 1, encoded(10));
+  pair.setOriginal('z', original(60));
+  await pair.variant('z 1', '', 1, encoded(50), 'z');
   assert.deepEqual(
-    [cache.original('h'), cache.etag('h 2'), cache.bytes],
-    [undefined, '', 70]
+    [
+      pair.original('z'),
+      ['x 1', 'y 1', 'z 1'].map(k => pair.etag(k)),
+      pair.bytes,
+    ],
+    [undefined, ['', '', ''], 80]
   );
 });
 
@@ -600,6 +609,39 @@ test('an etag holding a comma matches its ETag, warm or cold', async () => {
     store.calls.map(([, etag]) => etag),
     [undefined, 'v1,2', 'v1,2']
   );
+});
+
+test('a 304 keeps its variant recently used', async () => {
+  const data = await noisyJpeg(1200, 800);
+  const variant = await sharp(data)
+    .resize({ width: 640 })
+    .webp({ quality: 65 })
+    .toBuffer();
+  const fullReads = [];
+  const optimize = createOptimizer({
+    cacheSizeMb: (variant.length * 2.5) / 1024 / 1024,
+    load: (src, etag) => {
+      if (etag === 'v1') return { etag: 'v1' };
+      fullReads.push(src);
+      return { etag: 'v1', data };
+    },
+  });
+  const request = (id, ifNoneMatch) =>
+    optimize({
+      url: `/photos/${id}/image?size=640`,
+      headers: { accept: 'image/webp', 'if-none-match': ifNoneMatch },
+    });
+  await request('a');
+  await request('b');
+  const revalidated = await request('a', 'W/"v1-webp-640-65"');
+  await request('c');
+  const again = await request('a');
+  assert.deepEqual([revalidated.status, again.status], [304, 200]);
+  assert.deepEqual(fullReads, [
+    '/photos/a/image',
+    '/photos/b/image',
+    '/photos/c/image',
+  ]);
 });
 
 test('a variant evicted while load checked it is read again', async () => {

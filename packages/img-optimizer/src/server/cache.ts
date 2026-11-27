@@ -21,7 +21,8 @@ const touch = <T>(map: Map<string, T>, key: string, value: T) => {
 /**
  * Encoded variants and the originals they are encoded from, least recently
  * used first, sharing one byte budget; originals are evicted before variants,
- * except the one just stored or encoded from.
+ * except the one just stored or encoded from, which stays cached across widths
+ * while it fits alongside its encoded copy.
  */
 export class ImageCache {
   bytes = 0;
@@ -32,6 +33,13 @@ export class ImageCache {
 
   etag(key: string) {
     return this.variants.get(key)?.etag;
+  }
+
+  touchVariant(key: string, etag: string) {
+    const cached = this.variants.get(key);
+    if (cached?.etag === etag) {
+      touch(this.variants, key, cached);
+    }
   }
 
   quality(key: string, etag: string) {
@@ -108,6 +116,15 @@ export class ImageCache {
   }
 
   private trim(keepOriginal?: string, keepVariant?: string) {
+    if (
+      keepOriginal &&
+      keepVariant &&
+      (this.originals.get(keepOriginal)?.data.length ?? 0) +
+        (this.variants.get(keepVariant)?.bytes ?? 0) >
+        this.maxBytes
+    ) {
+      this.deleteOriginal(keepOriginal);
+    }
     for (const key of this.originals.keys()) {
       if (this.bytes <= this.maxBytes) {
         return;
@@ -123,9 +140,6 @@ export class ImageCache {
       if (key !== keepVariant && variant.bytes !== undefined) {
         this.deleteVariant(key);
       }
-    }
-    if (keepOriginal && this.bytes > this.maxBytes) {
-      this.deleteOriginal(keepOriginal);
     }
   }
 }
