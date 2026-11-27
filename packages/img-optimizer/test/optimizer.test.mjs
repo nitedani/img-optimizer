@@ -23,17 +23,17 @@ const solidJpeg = (width, height, background) =>
     .jpeg()
     .toBuffer();
 
-// An S3-like store: `held` still current answers without bytes.
+// An S3-like store: `cachedVersion` still current answers without bytes.
 const photoStore = async () => {
   const store = {
     version: 'v1',
     data: await solidJpeg(1200, 800, 'blue'),
     calls: [],
   };
-  store.load = async (src, held) => {
-    store.calls.push([src, held]);
+  store.load = async (src, cachedVersion) => {
+    store.calls.push([src, cachedVersion]);
     if (!store.data) return null;
-    if (held === store.version) return { version: store.version };
+    if (cachedVersion === store.version) return { version: store.version };
     const bytes = new Uint8Array(store.data.length + 8);
     bytes.set(store.data, 8);
     return { version: store.version, data: bytes.subarray(8) };
@@ -404,14 +404,14 @@ test('the cache stays within its bytes and evicts originals before variants', as
   assert.deepEqual(
     [
       cache.original('b', ''),
-      ['a 1', 'b 1', 'c 1', 'd 1'].map(k => cache.held(k)),
+      ['a 1', 'b 1', 'c 1', 'd 1'].map(k => cache.cachedVersion(k)),
       bytes(),
     ],
     [undefined, ['', '', '', ''], 100]
   );
   await cache.variant('e 1', '', 1, encoded(30));
   assert.deepEqual(
-    ['a 1', 'b 1', 'c 1', 'e 1'].map(k => cache.held(k)),
+    ['a 1', 'b 1', 'c 1', 'e 1'].map(k => cache.cachedVersion(k)),
     [undefined, undefined, '', '']
   );
   assert.equal(bytes(), 90);
@@ -419,7 +419,12 @@ test('the cache stays within its bytes and evicts originals before variants', as
   assert.equal(oversized.data.length, 101);
   cache.setOriginal('f', original(101));
   assert.deepEqual(
-    [cache.held('f 1'), cache.original('f', ''), cache.held('e 1'), bytes()],
+    [
+      cache.cachedVersion('f 1'),
+      cache.original('f', ''),
+      cache.cachedVersion('e 1'),
+      bytes(),
+    ],
     [undefined, undefined, '', 90]
   );
   await assert.rejects(
@@ -427,7 +432,7 @@ test('the cache stays within its bytes and evicts originals before variants', as
       throw new Error('corrupt image');
     })
   );
-  assert.equal(cache.held('g 1'), undefined);
+  assert.equal(cache.cachedVersion('g 1'), undefined);
 });
 
 test('load serves the image at the pathname, given as an option or per call', async () => {
@@ -491,7 +496,7 @@ test('load serves the image at the pathname, given as an option or per call', as
       ['/photos/5/image']
     );
     assert.deepEqual(
-      store.calls.map(([, held]) => held),
+      store.calls.map(([, cachedVersion]) => cachedVersion),
       [undefined, 'v1', 'v1', 'v1', 'v2']
     );
   }
@@ -527,7 +532,7 @@ test('an ETag the browser kept answers 304 without encoding, even on a cold cach
     Array(7).fill('200 W/"v1-webp-640-65"')
   );
   assert.deepEqual(
-    store.calls.map(([, held]) => held),
+    store.calls.map(([, cachedVersion]) => cachedVersion),
     [undefined, undefined, undefined, 'fake', undefined, undefined, undefined]
   );
 });
@@ -544,10 +549,10 @@ test('a variant evicted while load checked it is read again', async () => {
   const checking = new Promise(resolve => (release = resolve));
   const optimize = createOptimizer({
     cacheSizeMb: (variant.length * 1.5) / 1024 / 1024,
-    load: async (src, held) => {
+    load: async (src, cachedVersion) => {
       if (src === '/photos/6/image') return { version: 'o', data: other };
-      if (held) await checking;
-      return store.load(src, held);
+      if (cachedVersion) await checking;
+      return store.load(src, cachedVersion);
     },
   });
   const request = id =>
@@ -562,7 +567,7 @@ test('a variant evicted while load checked it is read again', async () => {
   const answer = await again;
   assert.deepEqual([answer.status, answer.body], [200, first.body]);
   assert.deepEqual(
-    store.calls.map(([, held]) => held),
+    store.calls.map(([, cachedVersion]) => cachedVersion),
     [undefined, 'v1', undefined]
   );
 });

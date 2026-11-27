@@ -3,17 +3,17 @@ export type ImageBytes = Buffer | ArrayBuffer | Uint8Array;
 export interface LoadedImage {
   /** Changes whenever the image does, e.g. its S3 ETag without the quotes. */
   version: string;
-  /** Left out when `held` is still the current version. */
+  /** Left out when `cachedVersion` is still the current version. */
   data?: ImageBytes;
 }
 
 /**
- * Loads the image of a private route; `held` is the version the optimizer
- * already has, and `null` answers 404.
+ * Loads the image of a private route; `cachedVersion` is the version the
+ * optimizer already has, and `null` answers 404.
  */
 export type ImageLoader = (
   src: string,
-  held?: string
+  cachedVersion?: string
 ) => LoadedImage | null | Promise<LoadedImage | null>;
 
 export type StaticAssetLoader = (

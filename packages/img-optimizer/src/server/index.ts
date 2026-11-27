@@ -180,10 +180,12 @@ export function createOptimizer(
 
     const key = `private:${src}:${format}:${size}:${qualityKey}`;
     const ifNoneMatch = headers['if-none-match'];
-    const read = (held?: string) =>
-      readOnce(`private:${src}:${held ?? ''}`, async () => load(src, held));
+    const read = (cachedVersion?: string) =>
+      readOnce(`private:${src}:${cachedVersion ?? ''}`, async () =>
+        load(src, cachedVersion)
+      );
     let loaded = await read(
-      cache.held(key) ??
+      cache.cachedVersion(key) ??
         versionIn(ifNoneMatch, `-${format}-${size}-${quality}"`)
     );
     if (!loaded) {
@@ -195,7 +197,7 @@ export function createOptimizer(
       }"`;
     if (
       loaded.data === undefined &&
-      cache.held(key) !== loaded.version &&
+      cache.cachedVersion(key) !== loaded.version &&
       !ifNoneMatchMatches(ifNoneMatch, etagOf(loaded.version))
     ) {
       loaded = await read();

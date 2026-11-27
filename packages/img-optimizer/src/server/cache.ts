@@ -31,7 +31,7 @@ export class ImageCache {
 
   constructor(private maxBytes: number) {}
 
-  held(key: string) {
+  cachedVersion(key: string) {
     return this.variants.get(key)?.version;
   }
 

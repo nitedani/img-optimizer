@@ -108,7 +108,7 @@ app.get("/photos/:id/image", async (req, res, next) => {
     const result = await optimize({
       url: req.url,
       headers: req.headers,
-      load: (src, held) => loadPhoto(req.params.id, held),
+      load: (src, cachedVersion) => loadPhoto(req.params.id, cachedVersion),
     });
     const { body, status, headers } = result;
     res.status(status).header(headers).send(body);
@@ -117,4 +117,4 @@ app.get("/photos/:id/image", async (req, res, next) => {
   }
 });
 ```
-`load(src, held)` returns `{ version, data }`, or `null` for a missing image (a 404). `version` changes whenever the image does, e.g. its S3 ETag without the quotes, and `data` is its bytes. `held` is the version the optimizer already has: when it is still current, leave out `data`, e.g. from an S3 GET with `IfNoneMatch: held`. Answers carry an `ETag`, so a browser asking again for an unchanged image gets a 304 with no download, and `Cache-Control: private, no-cache`; a page that puts the version in the URL (`/photos/5/image?size=640&v=<version>`) lets the browser keep it for a day. An image narrower than the size is answered at its own width. `createOptimizer({ load })` uses one loader for every request.
+`load(src, cachedVersion)` returns `{ version, data }`, or `null` for a missing image (a 404). `version` changes whenever the image does, e.g. its S3 ETag without the quotes, and `data` is its bytes. `cachedVersion` is the version the optimizer already has: when it is still current, leave out `data`, e.g. from an S3 GET with `IfNoneMatch: cachedVersion`. Answers carry an `ETag`, so a browser asking again for an unchanged image gets a 304 with no download, and `Cache-Control: private, no-cache`; a page that puts the version in the URL (`/photos/5/image?size=640&v=<version>`) lets the browser keep it for a day. An image narrower than the size is answered at its own width. `createOptimizer({ load })` uses one loader for every request.
