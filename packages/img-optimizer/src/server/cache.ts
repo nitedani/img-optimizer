@@ -20,12 +20,12 @@ const touch = <T>(map: Map<string, T>, key: string, value: T) => {
 
 /**
  * Encoded variants and the originals they are encoded from, least recently
- * used first, sharing one byte budget; originals are evicted before variants,
- * except the one just stored or encoded from, which stays cached across widths
- * while it fits alongside its encoded copy.
+ * used first, sharing one byte budget; originals are evicted before variants
+ * and are only kept when they fit alongside cached variants.
  */
 export class ImageCache {
   bytes = 0;
+  private variantBytes = 0;
   private variants = new Map<string, Variant>();
   private originals = new Map<string, Original>();
 
@@ -51,8 +51,7 @@ export class ImageCache {
     key: string,
     etag: string,
     quality: number,
-    encode: () => Promise<EncodedVariant>,
-    keepOriginal?: string
+    encode: () => Promise<EncodedVariant>
   ) {
     const cached = this.variants.get(key);
     if (cached?.etag === etag) {
@@ -75,8 +74,9 @@ export class ImageCache {
         }
         variant.bytes = bytes;
         this.bytes += bytes;
+        this.variantBytes += bytes;
         touch(this.variants, key, variant);
-        this.trim(keepOriginal, key);
+        this.trim(key);
       },
       () => {
         if (this.variants.get(key) === variant) {
@@ -99,16 +99,25 @@ export class ImageCache {
     this.deleteOriginal(key);
     // An oversized variant is never kept, so it reserves nothing.
     const reserve = reserveBytes > this.maxBytes ? 0 : reserveBytes;
-    if (original.data.length + reserve > this.maxBytes) {
+    if (this.variantBytes + reserve + original.data.length > this.maxBytes) {
       return;
     }
     this.originals.set(key, original);
     this.bytes += original.data.length;
-    this.trim(key);
+    for (const other of this.originals.keys()) {
+      if (this.bytes + reserve <= this.maxBytes) {
+        return;
+      }
+      if (other !== key) {
+        this.deleteOriginal(other);
+      }
+    }
   }
 
   private deleteVariant(key: string) {
-    this.bytes -= this.variants.get(key)?.bytes ?? 0;
+    const bytes = this.variants.get(key)?.bytes ?? 0;
+    this.bytes -= bytes;
+    this.variantBytes -= bytes;
     this.variants.delete(key);
   }
 
@@ -117,23 +126,12 @@ export class ImageCache {
     this.originals.delete(key);
   }
 
-  private trim(keepOriginal?: string, keepVariant?: string) {
-    if (
-      keepOriginal &&
-      keepVariant &&
-      (this.originals.get(keepOriginal)?.data.length ?? 0) +
-        (this.variants.get(keepVariant)?.bytes ?? 0) >
-        this.maxBytes
-    ) {
-      this.deleteOriginal(keepOriginal);
-    }
+  private trim(keepVariant: string) {
     for (const key of this.originals.keys()) {
       if (this.bytes <= this.maxBytes) {
         return;
       }
-      if (key !== keepOriginal) {
-        this.deleteOriginal(key);
-      }
+      this.deleteOriginal(key);
     }
     for (const [key, variant] of this.variants) {
       if (this.bytes <= this.maxBytes) {

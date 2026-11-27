@@ -313,13 +313,13 @@ test('a failed load is not kept, so the next request loads again', async t => {
   assert.equal(loads, 2);
 });
 
-test('a new photo reuses its original across widths once variants fill the cache', async () => {
+test('a photo reuses its cached original across widths beside cached variants', async () => {
   const [filler, photo] = await Promise.all([
     noisyJpeg(1200, 800),
     noisyJpeg(1200, 800),
   ]);
   let loads = 0;
-  const optimize = createOptimizer({ cacheSizeMb: 1 });
+  const optimize = createOptimizer();
   const request = (src, size) =>
     optimize({
       url: `/img-optimizer?src=${src}&size=${size}`,
@@ -339,6 +339,45 @@ test('a new photo reuses its original across widths once variants fill the cache
     readsAfterEach.push(loads);
   }
   assert.deepEqual(readsAfterEach, [1, 1, 1]);
+});
+
+test('a large original never evicts warm thumbnails to stay cached', async () => {
+  const [large, ...thumbnails] = await Promise.all([
+    noisyJpeg(1600, 1100),
+    ...Array.from({ length: 4 }, () => noisyJpeg(450, 300)),
+  ]);
+  const photos = [...thumbnails, large];
+  const request = (optimize, i) =>
+    optimize({
+      url: `/img-optimizer?src=/photo-${i}.jpg&size=360`,
+      headers: { accept: 'image/webp' },
+    });
+  const measure = createOptimizer({
+    loadStaticAsset: src => photos[src.match(/\d+/)[0]],
+  });
+  const variants = [];
+  for (const i of photos.keys()) {
+    variants.push((await request(measure, i)).body.length);
+  }
+  // Room for the large original beside its own variant, not beside all five.
+  const cacheBytes = large.length + variants[4] + Math.min(...variants) / 2;
+  const loads = [0, 0, 0, 0, 0];
+  const optimize = createOptimizer({
+    cacheSizeMb: cacheBytes / 1024 / 1024,
+    loadStaticAsset: src => {
+      const i = src.match(/\d+/)[0];
+      loads[i]++;
+      return photos[i];
+    },
+  });
+  for (const i of photos.keys()) {
+    assert.equal((await request(optimize, i)).status, 200);
+  }
+  const revisits = await Promise.all(
+    [0, 1, 2, 3].map(i => request(optimize, i))
+  );
+  assert.ok(revisits.every(r => r.status === 200));
+  assert.deepEqual(loads.slice(0, 4), [1, 1, 1, 1]);
 });
 
 test('simultaneous requests share one read and one encode per variant', async t => {
@@ -471,17 +510,18 @@ test('the cache stays within its bytes, evicting older originals before variants
   assert.equal(cache.etag('g 1'), undefined);
 
   cache.setOriginal('h', original(40));
-  await cache.variant('h 1', '', 1, encoded(20), 'h');
+  assert.deepEqual([cache.original('h'), cache.bytes], [undefined, 90]);
+  await cache.variant('h 1', '', 1, encoded(20));
   assert.deepEqual(
-    [!!cache.original('h'), cache.etag('d 1'), cache.bytes],
-    [true, undefined, 90]
+    [cache.etag('c 1'), cache.etag('d 1'), cache.bytes],
+    [undefined, '', 80]
   );
 
   const pair = new ImageCache(100);
   await pair.variant('x 1', '', 1, encoded(20));
   await pair.variant('y 1', '', 1, encoded(10));
   pair.setOriginal('z', original(60));
-  await pair.variant('z 1', '', 1, encoded(50), 'z');
+  await pair.variant('z 1', '', 1, encoded(50));
   assert.deepEqual(
     [
       pair.original('z'),

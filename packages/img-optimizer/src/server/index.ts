@@ -344,8 +344,7 @@ export function createOptimizer(
         JSON.stringify(['public', src, format, size, qualityKey]),
         '',
         quality,
-        sizeImage,
-        originalKey
+        sizeImage
       );
     } catch (error) {
       if (!(error instanceof SizeError)) {
