@@ -90,9 +90,9 @@ This library requires the Sharp native dependecies to be present at runtime. The
 
 
 createOptimizer options:
-- <b>cacheSizeMb?: number</b><br> img-optimizer caches the compressed images and the originals they are made from. This option sets the upper limit of the cache size in megabytes; originals are dropped first.
+- <b>cacheSizeMb?: number</b><br> img-optimizer caches the compressed images and the originals they are made from. This option sets the upper limit of the cache size in megabytes. Older originals are dropped before compressed images, but the original being resized stays cached across its widths when it fits. default: 50
 - <b>sizes?: number[]</b><br> img-optimizer can be restricted to only serve specific sizes(width). If the size is not allowed, a 400 bad response will be returned. default: [360, 640, 1024, 1280, 1600, 1920, 2560, 3840]
-- <b>qualities?: number[]</b><br> `?quality=` values (1-100) that get their own cached copy of an image. Other values share one copy per image, size and format, encoded at the first of them asked for. Without `?quality=`, the format's quality is used.
+- <b>qualities?: number[]</b><br> `?quality=` values (1-100) that get their own cached copy of an image. Any other value shares one copy per image, size and format, encoded at the first unlisted quality requested. Without `?quality=`, the format's quality is used. default: none, so every `?quality=` value shares that one copy.
 - <b>formats?: Format[]</b><br> default: [
       {
         format: 'avif',
@@ -107,7 +107,7 @@ createOptimizer options:
 
 ### Private images
 
-For images that only some users may see, check access in your own route, then pass `load`. The optimizer serves the image at the request's path instead of `?src=`, so a public `?src=` request never reaches it. Requests for the same path at the same time share one `load` call, so check access before calling `optimize`.
+For images that only some users may see, check access in your own route, then pass `load`. `optimize` keys these images by the URL's pathname, not `?src=`, so a public `?src=` request never reaches them. Requests for the same pathname at the same time share one `load` call. Pass `req.originalUrl`, so a route in a mounted `express.Router()` keeps its mount path. If two routes can serve different images at the same pathname, give each its own optimizer.
 ```ts
 app.get("/photos/:id/image", async (req, res, next) => {
   try {
@@ -115,7 +115,7 @@ app.get("/photos/:id/image", async (req, res, next) => {
       return res.sendStatus(403);
     }
     const result = await optimize({
-      url: req.url,
+      url: req.originalUrl,
       headers: req.headers,
       load: (src, cachedVersion) => loadPhoto(req.params.id, cachedVersion),
     });
@@ -126,4 +126,6 @@ app.get("/photos/:id/image", async (req, res, next) => {
   }
 });
 ```
-`load(src, cachedVersion)` returns `{ version, data }`, or `null` for a missing image (a 404). `version` changes whenever the image does, e.g. its S3 ETag without the quotes, and `data` is its bytes. `cachedVersion` is the version the optimizer already has: when it is still current, leave out `data`, e.g. from an S3 GET with `IfNoneMatch: cachedVersion`. Answers carry an `ETag`, so a browser asking again for an unchanged image gets a 304 with no download, and `Cache-Control: private, no-cache`; a page that puts the version in the URL (`/photos/5/image?size=640&v=<version>`) lets the browser keep it for a day. An image narrower than the size is answered at its own width. `createOptimizer({ load })` uses one loader for every request.
+`load(src, cachedVersion)` gets the request's pathname as `src`, e.g. `"/photos/5/image"`, and `cachedVersion` from the cache or from the browser's `If-None-Match` ETag. It returns `{ version, data }`, where `version` changes whenever the image does (e.g. its S3 ETag without the quotes) and `data` is its bytes. When `cachedVersion` is still current, it returns `{ version }` without `data`, e.g. when an S3 GET with `IfNoneMatch: cachedVersion` answers 304. It returns `null` for a missing image, which answers 404. `createOptimizer({ load })` sets a default loader, and a `load` passed to `optimize` overrides it.
+
+Answers carry an `ETag`, so a browser asking again for an unchanged image gets a 304 with `body: null`. They also carry `Cache-Control: private, no-cache`. Adding `&v=<version>` to the URL (`/photos/5/image?size=640&v=<version>`) lets the browser cache the image for a day (`private, max-age=86400`). An image narrower than the requested `size` is returned at its own width instead of redirecting. If another middleware such as `cors()` already sets `Vary`, pass `headers.Vary` to `res.vary()` and leave it out of `res.header()`, so both values stay.
