@@ -8,17 +8,17 @@ export const parseHeaders = (
   if (typeof headers.forEach === 'function') {
     headers.forEach((value, key) => {
       if (Array.isArray(value)) {
-        result[key] = value[0];
+        result[key.toLowerCase()] = value[0];
       } else {
-        result[key] = value || '';
+        result[key.toLowerCase()] = value || '';
       }
     });
   } else {
     for (const [key, value] of Object.entries(headers)) {
       if (Array.isArray(value)) {
-        result[key] = value[0];
+        result[key.toLowerCase()] = value[0];
       } else {
-        result[key] = value || '';
+        result[key.toLowerCase()] = value || '';
       }
     }
   }

@@ -1,5 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import sharp from 'sharp';
 import { createOptimizer } from 'img-optimizer/server';
 import { ImageCache } from '../lib/server/cache.js';
@@ -395,4 +397,260 @@ test('the cache stays within its bytes and evicts originals before variants', as
     })
   );
   assert.equal(cache.held('g 1'), undefined);
+});
+
+const solidJpeg = (width, height, background) =>
+  sharp({ create: { width, height, channels: 3, background } })
+    .jpeg()
+    .toBuffer();
+
+// An S3-like store: `held` still current answers without bytes.
+const photoStore = async () => {
+  const store = {
+    version: 'v1',
+    data: await solidJpeg(1200, 800, 'blue'),
+    calls: [],
+  };
+  store.load = async (src, held) => {
+    store.calls.push([src, held]);
+    if (!store.data) return null;
+    if (held === store.version) return { version: store.version };
+    const bytes = new Uint8Array(store.data.length + 8);
+    bytes.set(store.data, 8);
+    return { version: store.version, data: bytes.subarray(8) };
+  };
+  return store;
+};
+
+test('load serves the image at the pathname, given as an option or per call', async () => {
+  for (const via of ['options', 'per call']) {
+    const store = await photoStore();
+    const optimizer =
+      via === 'options'
+        ? createOptimizer({ load: store.load })
+        : createOptimizer();
+    const request = (query, headers = {}) =>
+      optimizer({
+        url: `/photos/5/image?${query}`,
+        headers: { accept: 'image/webp', ...headers },
+        ...(via === 'per call' && { load: store.load }),
+      });
+
+    const first = await request('size=640&src=/other.jpg');
+    assert.equal(first.status, 200, via);
+    assert.deepEqual(first.headers, {
+      'Content-Type': 'image/webp',
+      ETag: 'W/"v1-webp-640-65"',
+      'Cache-Control': 'private, no-cache',
+      Vary: 'Accept',
+      'X-Content-Type-Options': 'nosniff',
+    });
+    assert.equal((await sharp(first.body).metadata()).width, 640);
+    const versioned = await request('size=640&v=v1');
+    assert.deepEqual(
+      [versioned.status, versioned.headers['Cache-Control']],
+      [200, 'private, max-age=86400']
+    );
+    const notModified = await request('size=640', {
+      'if-none-match': 'W/"v1-webp-640-65"',
+    });
+    assert.deepEqual(
+      [notModified.status, notModified.body, notModified.headers.ETag],
+      [304, null, 'W/"v1-webp-640-65"']
+    );
+    const response = new Response(notModified.body, notModified);
+    assert.equal(response.status, 304);
+
+    store.version = 'v2';
+    store.data = await solidJpeg(1200, 800, 'red');
+    const replaced = await request('size=640', {
+      'if-none-match': 'W/"v1-webp-640-65"',
+    });
+    assert.deepEqual(
+      [replaced.status, replaced.headers.ETag],
+      [200, 'W/"v2-webp-640-65"']
+    );
+    assert.notDeepEqual(replaced.body, first.body);
+
+    store.data = null;
+    const deleted = await request('size=640');
+    assert.deepEqual(
+      [deleted.status, deleted.body, deleted.headers],
+      [404, 'Not found', { 'Content-Type': 'text/plain' }]
+    );
+    assert.deepEqual(
+      [...new Set(store.calls.map(([src]) => src))],
+      ['/photos/5/image']
+    );
+    assert.deepEqual(
+      store.calls.map(([, held]) => held),
+      [undefined, 'v1', 'v1', 'v1', 'v2']
+    );
+  }
+});
+
+test('an ETag the browser kept answers 304 without encoding, even on a cold cache', async t => {
+  const store = await photoStore();
+  const encodes = t.mock.method(sharp.prototype, 'toBuffer');
+  const request = (size, ifNoneMatch) =>
+    createOptimizer({ load: store.load })({
+      url: `/photos/5/image?size=${size}`,
+      headers: { Accept: 'image/webp', 'If-None-Match': ifNoneMatch },
+    });
+  const cold = await request(640, 'W/"v1-webp-640-65"');
+  assert.deepEqual([cold.status, cold.body], [304, null]);
+  assert.deepEqual(store.calls, [['/photos/5/image', 'v1']]);
+  assert.equal(encodes.mock.callCount(), 0);
+
+  store.calls = [];
+  const answers = await Promise.all(
+    [
+      'W/"v1-webp-360-65"',
+      'W/"v1-avif-640-65"',
+      'W/"v1-webp-640-80"',
+      'W/"fake-webp-640-65"',
+      'W/"*-webp-640-65"',
+      'W/"v"1-webp-640-65"',
+      '*',
+    ].map(ifNoneMatch => request(640, ifNoneMatch))
+  );
+  assert.deepEqual(
+    answers.map(r => `${r.status} ${r.headers.ETag}`),
+    Array(7).fill('200 W/"v1-webp-640-65"')
+  );
+  assert.deepEqual(
+    store.calls.map(([, held]) => held),
+    [undefined, undefined, undefined, 'fake', undefined, undefined, undefined]
+  );
+});
+
+test('a variant evicted while load checked it is read again', async () => {
+  const store = await photoStore();
+  store.data = await noisyJpeg(1200, 800);
+  const other = await noisyJpeg(1200, 800);
+  const variant = await sharp(store.data)
+    .resize({ width: 640 })
+    .webp({ quality: 65 })
+    .toBuffer();
+  let release;
+  const checking = new Promise(resolve => (release = resolve));
+  const optimize = createOptimizer({
+    cacheSizeMb: (variant.length * 1.5) / 1024 / 1024,
+    load: async (src, held) => {
+      if (src === '/photos/6/image') return { version: 'o', data: other };
+      if (held) await checking;
+      return store.load(src, held);
+    },
+  });
+  const request = id =>
+    optimize({
+      url: `/photos/${id}/image?size=640`,
+      headers: { accept: 'image/webp' },
+    });
+  const first = await request(5);
+  const again = request(5);
+  await request(6);
+  release();
+  const answer = await again;
+  assert.deepEqual([answer.status, answer.body], [200, first.body]);
+  assert.deepEqual(
+    store.calls.map(([, held]) => held),
+    [undefined, 'v1', undefined]
+  );
+});
+
+test('load answers a narrower image at its own width, never redirecting', async () => {
+  const narrow = await solidJpeg(500, 300, 'blue');
+  const { status, body } = await createOptimizer()({
+    url: '/photos/5/image?size=640',
+    headers: { accept: 'image/avif' },
+    load: () => ({ version: 'v1', data: new Uint8Array(narrow).buffer }),
+  });
+  assert.equal(status, 200);
+  const { width, format } = await sharp(body).metadata();
+  assert.deepEqual([width, format], [500, 'heif']);
+});
+
+test('a size load is not configured for is a bad request', async () => {
+  const store = await photoStore();
+  const answers = await Promise.all(
+    ['size=500', 'size=abc', 'size=640.0', 'size=+640', ''].map(query =>
+      createOptimizer({ load: store.load })({ url: `/photos/5/image?${query}` })
+    )
+  );
+  assert.deepEqual(
+    answers.map(r => [r.status, r.body, r.headers['Content-Type']]),
+    Array(5).fill([400, 'Bad request', 'text/plain'])
+  );
+  assert.deepEqual(store.calls, []);
+});
+
+test('a failing load or encode rejects and is not kept', async () => {
+  let failing = true;
+  const jpeg = await solidJpeg(1200, 800, 'blue');
+  const optimize = createOptimizer({
+    load: () => {
+      if (failing) throw new Error('storage timed out');
+      return { version: 'v1', data: jpeg };
+    },
+  });
+  const request = () => optimize({ url: '/photos/5/image?size=640' });
+  await assert.rejects(request(), /storage timed out/);
+  failing = false;
+  assert.equal((await request()).status, 200);
+  await assert.rejects(
+    createOptimizer()({
+      url: '/photos/5/image?size=640',
+      load: () => ({ version: 'v1', data: Buffer.from('not an image') }),
+    })
+  );
+});
+
+test('a public ?src= of the same path and load never share a cache entry', async () => {
+  const store = await photoStore();
+  const publicJpeg = await solidJpeg(1200, 800, 'green');
+  let publicLoads = 0;
+  const optimize = createOptimizer();
+  const publicRequest = () =>
+    optimize({
+      url: '/img-optimizer?src=/photos/5/image&size=640',
+      headers: { accept: 'image/webp' },
+      loadStaticAsset: () => {
+        publicLoads++;
+        return publicJpeg;
+      },
+    });
+  const [before, secret] = await Promise.all([
+    publicRequest(),
+    optimize({
+      url: '/photos/5/image?size=640',
+      headers: { accept: 'image/webp' },
+      load: store.load,
+    }),
+  ]);
+  const after = await publicRequest();
+  assert.deepEqual(
+    [before.status, secret.status, after.status],
+    [200, 200, 200]
+  );
+  assert.notDeepEqual(secret.body, before.body);
+  assert.equal(after.body, before.body);
+  assert.deepEqual(store.calls, [['/photos/5/image', undefined]]);
+  assert.equal(publicLoads, 1);
+});
+
+test('the types keep 0.0.4 callers unchanged and give load a nullable body', async () => {
+  const tsc = new URL('../node_modules/.bin/tsc', import.meta.url).pathname;
+  const types = new URL('./types.ts', import.meta.url).pathname;
+  await promisify(execFile)(tsc, [
+    '--noEmit',
+    '--strict',
+    '--module',
+    'nodenext',
+    '--moduleResolution',
+    'nodenext',
+    '--types',
+    'node',
+    types,
+  ]);
 });

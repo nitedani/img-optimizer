@@ -35,8 +35,9 @@ export class ImageCache {
     return this.variants.get(key)?.version;
   }
 
-  quality(key: string) {
-    return this.variants.get(key)?.quality;
+  quality(key: string, version: string) {
+    const variant = this.variants.get(key);
+    return variant?.version === version ? variant.quality : undefined;
   }
 
   /** The variant cached under `key` at `version`, encoded with `encode` on a miss. */
