@@ -92,7 +92,7 @@ This library requires the Sharp native dependecies to be present at runtime. The
 createOptimizer options:
 - <b>cacheSizeMb?: number</b><br> img-optimizer caches the compressed images and the originals they are made from. This option sets the upper limit of the cache size in megabytes. Originals are dropped before compressed images and are only kept when they fit alongside the cached compressed images. default: 50
 - <b>sizes?: number[]</b><br> img-optimizer can be restricted to only serve specific sizes(width). If the size is not allowed, a 400 bad response will be returned. default: [360, 640, 1024, 1280, 1600, 1920, 2560, 3840]
-- <b>qualities?: readonly number[]</b><br> `?quality=` values (1-100) that get their own cached copy. Without `?quality=`, the format's configured quality is used. Any valid quality not in `qualities` shares one copy per image, size and format, encoded at the first one requested while cached. default: none.
+- <b>qualities?: readonly number[]</b><br> `?quality=` values (1-100) that get their own cached copy. Without `?quality=`, the format's configured quality is used. Any valid quality not in `qualities` shares one copy per image, size and format, encoded at the first one requested while cached. default: none
 - <b>formats?: Format[]</b><br> default: [
       {
         format: 'avif',
@@ -116,10 +116,7 @@ app.get("/photos/:id/image", requirePhotoAccess, async (req, res, next) => {
     const { body, status, headers } = await optimizePhoto({
       url: req.originalUrl,
       headers: req.headers,
-      load: async (src, etag) => {
-        const photo = await getPhoto(req.params.id);
-        return photo ? { etag: photo.etag, data: photo.bytes } : null;
-      },
+      load: (src, etag) => loadPhoto(req.params.id, etag),
     });
     res.status(status).header(headers).send(body);
   } catch (error) {

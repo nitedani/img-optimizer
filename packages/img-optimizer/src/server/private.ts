@@ -66,7 +66,11 @@ export const privateOptimizer = (config: Config, cache: ImageCache) => {
           return (
             loaded && {
               etag: loaded.etag,
-              image: loaded.data && openImage(loaded.data),
+              image:
+                loaded.data &&
+                (original?.etag === loaded.etag
+                  ? original.image
+                  : openImage(loaded.data)),
             }
           );
         }

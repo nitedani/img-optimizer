@@ -262,6 +262,27 @@ test('a photo is read and opened once for all its widths and formats', async t =
   assert.equal(opens.mock.callCount(), 1);
 });
 
+test('a load that ignores the etag still opens the photo once', async t => {
+  const data = await solidJpeg(1200, 800, 'blue');
+  const opens = t.mock.method(sharp.prototype, 'rotate');
+  const optimize = createOptimizer({ load: () => ({ etag: 'v1', data }) });
+  const request = (size, accept, ifNoneMatch) =>
+    optimize({
+      url: `/photos/5/image?size=${size}`,
+      headers: { accept, 'if-none-match': ifNoneMatch },
+    });
+  const answers = [
+    await request(360, 'image/webp'),
+    await request(1024, 'image/avif'),
+    await request(360, 'image/webp', 'W/"v1-webp-360-65"'),
+  ];
+  assert.deepEqual(
+    answers.map(r => r.status),
+    [200, 200, 304]
+  );
+  assert.equal(opens.mock.callCount(), 1);
+});
+
 test('a width asked for while another encodes shares its read', async t => {
   const store = await photoStore();
   const opens = t.mock.method(sharp.prototype, 'rotate');
