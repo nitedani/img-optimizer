@@ -67,3 +67,5 @@ export const withForwardedLoad = async (options: Options, input: Input) => {
 export const addSize = (
   options: NonNullable<Parameters<typeof createOptimizer>[0]>
 ) => options.sizes?.push(512);
+
+export const constQualities = createOptimizer({ qualities: [45, 65] as const });

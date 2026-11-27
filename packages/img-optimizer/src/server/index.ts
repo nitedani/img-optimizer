@@ -157,7 +157,8 @@ export function createOptimizer(
   // Unlisted qualities share one slot, so a ?quality= sweep can't fill the cache.
   const pickEncoding = (
     headers: Record<string, string>,
-    requestedQuality: string | null
+    requestedQuality: string | null,
+    strictQuality = false
   ) => {
     const accept = headers['accept'] ?? 'webp';
     const { format, quality } =
@@ -165,6 +166,9 @@ export function createOptimizer(
       _optimizerOptions.formats[0];
     if (!requestedQuality) {
       return { format, quality, qualityKey: 'default' };
+    }
+    if (strictQuality && !/^\d+$/.test(requestedQuality)) {
+      return null;
     }
     const requested = parseInt(requestedQuality, 10);
     if (!(requested >= 1 && requested <= 100)) {
@@ -184,7 +188,7 @@ export function createOptimizer(
     const { pathname: src, searchParams } = parseUrl(url);
     const sizeStr = searchParams.get('size') ?? '';
     const size = Number(sizeStr);
-    const encoding = pickEncoding(headers, searchParams.get('quality'));
+    const encoding = pickEncoding(headers, searchParams.get('quality'), true);
     if (
       !/^\d+$/.test(sizeStr) ||
       !_optimizerOptions.sizes.includes(size) ||

@@ -30,7 +30,7 @@ export interface OptimizerOptions {
   cacheSizeMb?: number;
   sizes?: number[];
   /** `?quality=` values cached apart; other values share one cached copy. */
-  qualities?: number[];
+  qualities?: readonly number[];
   domains?: string[] | true;
 }
 

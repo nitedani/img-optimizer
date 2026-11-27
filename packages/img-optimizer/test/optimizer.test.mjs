@@ -663,13 +663,17 @@ test('a size or quality load is not configured for is a bad request', async () =
       '',
       'size=640&quality=0',
       'size=640&quality=101',
+      'size=640&quality=60.5',
+      'size=640&quality=60abc',
+      'size=640&quality=1e2',
+      'size=640&quality=100.9',
     ].map(query =>
       createOptimizer({ load: store.load })({ url: `/photos/5/image?${query}` })
     )
   );
   assert.deepEqual(
     answers.map(r => [r.status, r.body, r.headers]),
-    Array(7).fill([
+    Array(11).fill([
       400,
       'Bad request',
       {
