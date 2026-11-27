@@ -200,28 +200,24 @@ export function createOptimizer(
 
     const key = `private:${src}:${format}:${size}:${qualityKey}`;
     const tags = entityTags(headers['if-none-match']);
-    // The version in a tag this route sent for this variant.
+    // The image's etag in a tag this route sent for this variant.
     const suffix = `-${format}-${size}-${quality}"`;
-    const browserVersion = tags
+    const browserEtag = tags
       .filter(tag => tag.endsWith(suffix))
       .map(tag => tag.slice(1, -suffix.length))
-      .find(version => /^[^*\x00-\x1f\x7f]+$/.test(version));
-    const read = (cachedVersion?: string) =>
-      readOnce(`private:${src}:${cachedVersion ?? ''}`, async () =>
-        load(src, cachedVersion)
-      );
-    let loaded = await read(cache.cachedVersion(key) ?? browserVersion);
+      .find(etag => /^[^*\x00-\x1f\x7f]+$/.test(etag));
+    const read = (etag?: string) =>
+      readOnce(`private:${src}:${etag ?? ''}`, async () => load(src, etag));
+    let loaded = await read(cache.etag(key) ?? browserEtag);
     if (!loaded) {
       return privateTextAnswer(404, 'Not found');
     }
-    const tagOf = (version: string) =>
-      `"${version}-${format}-${size}-${
-        cache.quality(key, version) ?? quality
-      }"`;
+    const tagOf = (etag: string) =>
+      `"${etag}-${format}-${size}-${cache.quality(key, etag) ?? quality}"`;
     if (
       loaded.data === undefined &&
-      cache.cachedVersion(key) !== loaded.version &&
-      !tags.includes(tagOf(loaded.version))
+      cache.etag(key) !== loaded.etag &&
+      !tags.includes(tagOf(loaded.etag))
     ) {
       loaded = await read();
       if (!loaded) {
@@ -231,19 +227,19 @@ export function createOptimizer(
         throw new Error(`load returned no data for ${src}`);
       }
     }
-    const { version, data } = loaded;
+    const { etag, data } = loaded;
     const answerHeaders: Record<string, string> = {
-      ETag: `W/${tagOf(version)}`,
+      ETag: `W/${tagOf(etag)}`,
       'Cache-Control':
-        searchParams.get('v') === version
+        searchParams.get('v') === etag
           ? 'private, max-age=86400'
           : 'private, no-cache',
       Vary: 'Accept',
     };
-    if (tags.includes(tagOf(version))) {
+    if (tags.includes(tagOf(etag))) {
       return { status: 304, body: null, headers: answerHeaders };
     }
-    const image = await cache.variant(key, version, quality, async () => ({
+    const image = await cache.variant(key, etag, quality, async () => ({
       data: await encode(data!, format, quality, size),
     }));
     return {

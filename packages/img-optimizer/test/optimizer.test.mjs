@@ -23,20 +23,20 @@ const solidJpeg = (width, height, background) =>
     .jpeg()
     .toBuffer();
 
-// An S3-like store: `cachedVersion` still current answers without bytes.
+// An S3-like store: `etag` still current answers without bytes.
 const photoStore = async () => {
   const store = {
-    version: 'v1',
+    etag: 'v1',
     data: await solidJpeg(1200, 800, 'blue'),
     calls: [],
   };
-  store.load = async (src, cachedVersion) => {
-    store.calls.push([src, cachedVersion]);
+  store.load = async (src, etag) => {
+    store.calls.push([src, etag]);
     if (!store.data) return null;
-    if (cachedVersion === store.version) return { version: store.version };
+    if (etag === store.etag) return { etag: store.etag };
     const bytes = new Uint8Array(store.data.length + 8);
     bytes.set(store.data, 8);
-    return { version: store.version, data: bytes.subarray(8) };
+    return { etag: store.etag, data: bytes.subarray(8) };
   };
   return store;
 };
@@ -432,24 +432,21 @@ test('the cache stays within its bytes, evicting older originals before variants
   assert.deepEqual(
     [
       cache.original('b'),
-      ['a 1', 'b 1', 'c 1', 'd 1'].map(k => cache.cachedVersion(k)),
+      ['a 1', 'b 1', 'c 1', 'd 1'].map(k => cache.etag(k)),
       cache.bytes,
     ],
     [undefined, ['', '', '', ''], 100]
   );
   await cache.variant('e 1', '', 1, encoded(30));
   assert.deepEqual(
-    [
-      ['a 1', 'b 1', 'c 1', 'e 1'].map(k => cache.cachedVersion(k)),
-      cache.bytes,
-    ],
+    [['a 1', 'b 1', 'c 1', 'e 1'].map(k => cache.etag(k)), cache.bytes],
     [[undefined, undefined, '', ''], 90]
   );
   const oversized = await cache.variant('f 1', '', 1, encoded(101));
   assert.equal(oversized.data.length, 101);
   cache.setOriginal('f', original(101));
   assert.deepEqual(
-    [cache.cachedVersion('f 1'), cache.original('f'), cache.bytes],
+    [cache.etag('f 1'), cache.original('f'), cache.bytes],
     [undefined, undefined, 90]
   );
   await assert.rejects(
@@ -457,17 +454,17 @@ test('the cache stays within its bytes, evicting older originals before variants
       throw new Error('corrupt image');
     })
   );
-  assert.equal(cache.cachedVersion('g 1'), undefined);
+  assert.equal(cache.etag('g 1'), undefined);
 
   cache.setOriginal('h', original(40));
   await cache.variant('h 1', '', 1, encoded(20), 'h');
   assert.deepEqual(
-    [!!cache.original('h'), cache.cachedVersion('d 1'), cache.bytes],
+    [!!cache.original('h'), cache.etag('d 1'), cache.bytes],
     [true, undefined, 90]
   );
   await cache.variant('h 2', '', 1, encoded(70), 'h');
   assert.deepEqual(
-    [cache.original('h'), cache.cachedVersion('h 2'), cache.bytes],
+    [cache.original('h'), cache.etag('h 2'), cache.bytes],
     [undefined, '', 70]
   );
 });
@@ -511,7 +508,7 @@ test('load serves the image at the pathname, given as an option or per call', as
     const response = new Response(notModified.body, notModified);
     assert.equal(response.status, 304);
 
-    store.version = 'v2';
+    store.etag = 'v2';
     store.data = await solidJpeg(1200, 800, 'red');
     const replaced = await request('size=640', {
       'if-none-match': 'W/"v1-webp-640-65"',
@@ -541,7 +538,7 @@ test('load serves the image at the pathname, given as an option or per call', as
       ['/photos/5/image']
     );
     assert.deepEqual(
-      store.calls.map(([, cachedVersion]) => cachedVersion),
+      store.calls.map(([, etag]) => etag),
       [undefined, 'v1', 'v1', 'v1', 'v2']
     );
   }
@@ -577,14 +574,14 @@ test('an ETag the browser kept answers 304 without encoding, even on a cold cach
     Array(7).fill('200 W/"v1-webp-640-65"')
   );
   assert.deepEqual(
-    store.calls.map(([, cachedVersion]) => cachedVersion),
+    store.calls.map(([, etag]) => etag),
     [undefined, undefined, undefined, 'fake', undefined, undefined, undefined]
   );
 });
 
-test('a version holding a comma matches its ETag, warm or cold', async () => {
+test('an etag holding a comma matches its ETag, warm or cold', async () => {
   const store = await photoStore();
-  store.version = 'v1,2';
+  store.etag = 'v1,2';
   const request = (optimize, ifNoneMatch) =>
     optimize({
       url: '/photos/5/image?size=640',
@@ -600,7 +597,7 @@ test('a version holding a comma matches its ETag, warm or cold', async () => {
   );
   assert.deepEqual([warm.status, cold.status], [304, 304]);
   assert.deepEqual(
-    store.calls.map(([, cachedVersion]) => cachedVersion),
+    store.calls.map(([, etag]) => etag),
     [undefined, 'v1,2', 'v1,2']
   );
 });
@@ -617,10 +614,10 @@ test('a variant evicted while load checked it is read again', async () => {
   const checking = new Promise(resolve => (release = resolve));
   const optimize = createOptimizer({
     cacheSizeMb: (variant.length * 1.5) / 1024 / 1024,
-    load: async (src, cachedVersion) => {
-      if (src === '/photos/6/image') return { version: 'o', data: other };
-      if (cachedVersion) await checking;
-      return store.load(src, cachedVersion);
+    load: async (src, etag) => {
+      if (src === '/photos/6/image') return { etag: 'o', data: other };
+      if (etag) await checking;
+      return store.load(src, etag);
     },
   });
   const request = id =>
@@ -635,7 +632,7 @@ test('a variant evicted while load checked it is read again', async () => {
   const answer = await again;
   assert.deepEqual([answer.status, answer.body], [200, first.body]);
   assert.deepEqual(
-    store.calls.map(([, cachedVersion]) => cachedVersion),
+    store.calls.map(([, etag]) => etag),
     [undefined, 'v1', undefined]
   );
 });
@@ -645,7 +642,7 @@ test('load answers a narrower image at its own width, never redirecting', async 
   const { status, body } = await createOptimizer()({
     url: '/photos/5/image?size=640',
     headers: { accept: 'image/avif' },
-    load: () => ({ version: 'v1', data: new Uint8Array(narrow).buffer }),
+    load: () => ({ etag: 'v1', data: new Uint8Array(narrow).buffer }),
   });
   assert.equal(status, 200);
   const { width, format } = await sharp(body).metadata();
@@ -700,9 +697,9 @@ test('a failing load or encode rejects and is not kept', async () => {
   });
   const request = () => optimize({ url: '/photos/5/image?size=640' });
   await assert.rejects(request(), /storage timed out/);
-  answer = () => ({ version: 'v1', data: Buffer.from('not an image') });
+  answer = () => ({ etag: 'v1', data: Buffer.from('not an image') });
   await Promise.all([assert.rejects(request()), assert.rejects(request())]);
-  answer = () => ({ version: 'v1', data: jpeg });
+  answer = () => ({ etag: 'v1', data: jpeg });
   assert.equal((await request()).status, 200);
   assert.equal(loads, 3);
 });
@@ -718,7 +715,7 @@ test('private routes mounted at different paths serve their own images', async (
       optimize({
         url: `${path}?size=640`,
         headers: { accept: 'image/webp' },
-        load: () => ({ version: 'v1', data }),
+        load: () => ({ etag: 'v1', data }),
       })
     )
   );

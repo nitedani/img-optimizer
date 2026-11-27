@@ -6,7 +6,7 @@ export interface Original {
 }
 
 interface Variant {
-  version: string;
+  etag: string;
   quality: number;
   image: Promise<EncodedVariant>;
   /** Unset while the variant is encoding. */
@@ -30,29 +30,29 @@ export class ImageCache {
 
   constructor(private maxBytes: number) {}
 
-  cachedVersion(key: string) {
-    return this.variants.get(key)?.version;
+  etag(key: string) {
+    return this.variants.get(key)?.etag;
   }
 
-  quality(key: string, version: string) {
+  quality(key: string, etag: string) {
     const variant = this.variants.get(key);
-    return variant?.version === version ? variant.quality : undefined;
+    return variant?.etag === etag ? variant.quality : undefined;
   }
 
   variant(
     key: string,
-    version: string,
+    etag: string,
     quality: number,
     encode: () => Promise<EncodedVariant>,
     keepOriginal?: string
   ) {
     const cached = this.variants.get(key);
-    if (cached?.version === version) {
+    if (cached?.etag === etag) {
       touch(this.variants, key, cached);
       return cached.image;
     }
     this.deleteVariant(key);
-    const variant: Variant = { version, quality, image: encode() };
+    const variant: Variant = { etag, quality, image: encode() };
     this.variants.set(key, variant);
     variant.image.then(
       image => {

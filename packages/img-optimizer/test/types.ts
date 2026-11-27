@@ -13,10 +13,8 @@ export const withoutLoad = async (url: string) => {
   ];
 };
 
-const load = async (src: string, cachedVersion?: string) =>
-  cachedVersion === 'v1'
-    ? { version: 'v1' }
-    : { version: 'v1', data: new Uint8Array() };
+const load = async (src: string, etag?: string) =>
+  etag === 'v1' ? { etag: 'v1' } : { etag: 'v1', data: new Uint8Array() };
 
 export const withLoad = async () => {
   const perCall = await optimize({ url: '/photos/5?size=640', load });

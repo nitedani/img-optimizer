@@ -2,18 +2,18 @@ export type ImageBytes = Buffer | ArrayBuffer | Uint8Array;
 
 export interface LoadedImage {
   /** Changes whenever the image does, e.g. its S3 ETag without the quotes. */
-  version: string;
-  /** Left out when `cachedVersion` is still the current version. */
+  etag: string;
+  /** Left out when `etag` is still current. */
   data?: ImageBytes;
 }
 
 /**
- * `cachedVersion` is the version in the cache or in the browser's
- * If-None-Match; `null` answers 404.
+ * `etag` is the source ETag from the cache or the browser's If-None-Match;
+ * `null` answers 404.
  */
 export type ImageLoader = (
   src: string,
-  cachedVersion?: string
+  etag?: string
 ) => LoadedImage | null | Promise<LoadedImage | null>;
 
 export type StaticAssetLoader = (
