@@ -7,9 +7,9 @@ import {
   OptimizerResult,
   OptimizerInput,
   ImageLoader,
-  PrivateOptimizerInput,
+  LoadMayBeGiven,
+  Optimize,
   PrivateOptimizerResult,
-  PublicOptimizerInput,
 } from './types.js';
 import { loadBuffer } from './loadBuffer.js';
 import {
@@ -38,37 +38,16 @@ const privateTextAnswer = (status: number, body: string) => ({
   },
 });
 
-// never for an argument without a loader, which the public overload takes.
-type LoadMayBeGiven<T> = T extends { load?: infer Load }
-  ? [Load] extends [undefined]
-    ? never
-    : unknown
-  : never;
-
 export function createOptimizer(
   optimizerOptions: OptimizerOptions & { load: ImageLoader }
-): (
-  input: OptimizerInput & { load?: ImageLoader }
-) => Promise<PrivateOptimizerResult>;
-export function createOptimizer<
-  T extends OptimizerOptions & { load?: ImageLoader }
->(
+): (input: OptimizerInput) => Promise<PrivateOptimizerResult>;
+export function createOptimizer<T extends OptimizerOptions>(
   optimizerOptions: T & LoadMayBeGiven<T>
-): (
-  input: OptimizerInput & { load?: ImageLoader }
-) => Promise<OptimizerResult | PrivateOptimizerResult>;
+): (input: OptimizerInput) => Promise<OptimizerResult | PrivateOptimizerResult>;
 export function createOptimizer(
   optimizerOptions?: OptimizerOptions & { load?: undefined }
-): {
-  (input: PrivateOptimizerInput): Promise<PrivateOptimizerResult>;
-  <T extends OptimizerInput & { load?: ImageLoader }>(
-    input: T & LoadMayBeGiven<T>
-  ): Promise<OptimizerResult | PrivateOptimizerResult>;
-  (input: PublicOptimizerInput): Promise<OptimizerResult>;
-};
-export function createOptimizer(
-  optimizerOptions?: OptimizerOptions & { load?: ImageLoader }
-) {
+): Optimize;
+export function createOptimizer(optimizerOptions?: OptimizerOptions) {
   const _optimizerOptions = defu(optimizerOptions, {
     sizes: [360, 640, 1024, 1280, 1600, 1920, 2560, 3840],
     cacheSizeMb: 50,
@@ -177,7 +156,7 @@ export function createOptimizer(
   };
 
   const optimize = async (
-    optimizeOptions: OptimizerInput & { load?: ImageLoader }
+    optimizeOptions: OptimizerInput
   ): Promise<OptimizerResult | PrivateOptimizerResult> => {
     const headers = optimizeOptions.headers
       ? parseHeaders(optimizeOptions.headers)

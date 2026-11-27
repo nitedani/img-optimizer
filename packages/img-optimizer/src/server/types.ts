@@ -32,6 +32,8 @@ export interface OptimizerOptions {
   /** `?quality=` values cached apart; other values share one cached copy. */
   qualities?: readonly number[];
   domains?: string[] | true;
+  /** Reads the image at the request's pathname, for a route the app guards. */
+  load?: ImageLoader;
 }
 
 export interface OptimizerResult {
@@ -44,6 +46,7 @@ export interface OptimizerInput {
   url: string | URL;
   headers?: Record<string, string | string[] | undefined> | Headers;
   loadStaticAsset?: StaticAssetLoader;
+  load?: ImageLoader;
 }
 
 export interface PublicOptimizerInput extends OptimizerInput {
@@ -61,7 +64,24 @@ export interface PrivateOptimizerResult {
   status: number;
 }
 
+// never for an argument without a loader, which the public overload takes.
+export type LoadMayBeGiven<T> = T extends { load?: infer Load }
+  ? [Load] extends [undefined]
+    ? never
+    : unknown
+  : never;
+
+/** `optimize` of an optimizer made without `load`: each call's `load` decides. */
+export interface Optimize {
+  (input: PrivateOptimizerInput): Promise<PrivateOptimizerResult>;
+  <T extends OptimizerInput>(input: T & LoadMayBeGiven<T>): Promise<
+    OptimizerResult | PrivateOptimizerResult
+  >;
+  (input: PublicOptimizerInput): Promise<OptimizerResult>;
+}
+
 /** The options with their defaults filled in. */
-export type Config = OptimizerOptions & { load?: ImageLoader } & Required<
+export type Config = OptimizerOptions &
+  Required<
     Pick<OptimizerOptions, 'sizes' | 'cacheSizeMb' | 'formats' | 'domains'>
   >;
