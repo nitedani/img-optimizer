@@ -197,6 +197,7 @@ export function createOptimizer(
 
     const key = JSON.stringify(['private', src, format, size, qualityKey]);
     const tags = entityTags(headers['if-none-match']);
+    const matchesAny = headers['if-none-match']?.trim() === '*';
     // A candidate source etag from a browser tag matching this variant.
     const suffix = `-${format}-${size}-${quality}"`;
     const browserEtag = tags
@@ -216,7 +217,7 @@ export function createOptimizer(
     if (
       loaded.data === undefined &&
       cache.etag(key) !== loaded.etag &&
-      !tags.includes(tagOf(loaded.etag))
+      !(matchesAny || tags.includes(tagOf(loaded.etag)))
     ) {
       loaded = await read();
       if (!loaded) {
@@ -235,7 +236,7 @@ export function createOptimizer(
           : 'private, no-cache',
       Vary: 'Accept',
     };
-    if (tags.includes(tagOf(etag))) {
+    if (matchesAny || tags.includes(tagOf(etag))) {
       cache.touchVariant(key, etag);
       return { status: 304, body: null, headers: answerHeaders };
     }
@@ -309,32 +310,26 @@ export function createOptimizer(
       });
       return { data, originalWidth: await readWidth(data) };
     };
+    let loadedOriginal: Original | undefined;
+    let ownsRead = false;
     const sizeImage = async (): Promise<EncodedVariant> => {
       let original = cache.original(originalKey);
-      // Other widths share this read until its owner's encode settles.
-      const ownsRead = !original && !inFlightLoads.has(originalKey);
+      // Other widths share this read until the request that started it settles.
+      ownsRead = !original && !inFlightLoads.has(originalKey);
       if (ownsRead) {
         inFlightLoads.set(originalKey, readOriginal());
       }
-      const reading = inFlightLoads.get(originalKey) as Promise<Original>;
-      try {
-        original ??= await reading;
-        const { originalWidth } = original;
-        if (size !== originalWidth && !_optimizerOptions.sizes.includes(size)) {
-          throw new SizeError();
-        }
-        if (size > originalWidth) {
-          cache.setOriginal(originalKey, original, 64);
-          return { redirectTo: originalWidth };
-        }
-        const data = await encode(original.data, format, quality, size);
-        cache.setOriginal(originalKey, original, data.length);
-        return { data };
-      } finally {
-        if (ownsRead) {
-          inFlightLoads.delete(originalKey);
-        }
+      original ??= await (inFlightLoads.get(originalKey) as Promise<Original>);
+      const { originalWidth } = original;
+      if (size !== originalWidth && !_optimizerOptions.sizes.includes(size)) {
+        cache.setOriginal(originalKey, original);
+        throw new SizeError();
       }
+      loadedOriginal = original;
+      if (size > originalWidth) {
+        return { redirectTo: originalWidth };
+      }
+      return { data: await encode(original.data, format, quality, size) };
     };
 
     let image: EncodedVariant;
@@ -345,6 +340,10 @@ export function createOptimizer(
         quality,
         sizeImage
       );
+      // Admitted after variant() trims, into the space the variants leave.
+      if (loadedOriginal) {
+        cache.setOriginal(originalKey, loadedOriginal);
+      }
     } catch (error) {
       if (!(error instanceof SizeError)) {
         console.error(error);
@@ -354,6 +353,10 @@ export function createOptimizer(
         body: 'Bad request',
         headers: {},
       };
+    } finally {
+      if (ownsRead) {
+        inFlightLoads.delete(originalKey);
+      }
     }
     if ('data' in image) {
       return {

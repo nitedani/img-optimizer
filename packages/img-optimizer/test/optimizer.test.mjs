@@ -384,6 +384,75 @@ test('a large original never evicts warm thumbnails to stay cached', async () =>
   assert.deepEqual(loads.slice(0, 4), [1, 1, 1, 1]);
 });
 
+test('an original is kept in the room left once a new variant evicts others', async () => {
+  const [wide, photo] = await Promise.all([
+    noisyJpeg(1024, 720),
+    noisyJpeg(850, 580),
+  ]);
+  const sources = { '/wide.jpg': wide, '/photo.jpg': photo };
+  const queries = [
+    'src=/wide.jpg&size=1024&quality=100',
+    'src=/photo.jpg&size=360',
+    'src=/photo.jpg&size=640',
+  ];
+  const request = (optimize, query) =>
+    optimize({
+      url: `/img-optimizer?${query}`,
+      headers: { accept: 'image/webp' },
+    });
+  const measure = createOptimizer({ loadStaticAsset: src => sources[src] });
+  const sizes = [];
+  for (const query of queries) {
+    sizes.push((await request(measure, query)).body.length);
+  }
+  // The 360 variant evicts the wide one; the photo then fits beside its two.
+  const cacheBytes = sizes[0] + sizes[1] / 2;
+  assert.ok(photo.length + sizes[1] + sizes[2] <= cacheBytes);
+  const loads = [];
+  const optimize = createOptimizer({
+    cacheSizeMb: cacheBytes / 1024 / 1024,
+    loadStaticAsset: src => {
+      loads.push(src);
+      return sources[src];
+    },
+  });
+  for (const query of queries) {
+    assert.equal((await request(optimize, query)).status, 200);
+  }
+  assert.deepEqual(loads, ['/wide.jpg', '/photo.jpg']);
+});
+
+test('a width outside sizes keeps its original for the next width, never over a variant', async () => {
+  const photo = await noisyJpeg(1200, 800);
+  let loads = 0;
+  const request = (optimize, size) =>
+    optimize({
+      url: `/img-optimizer?src=/photo.jpg&size=${size}`,
+      headers: { accept: 'image/webp' },
+      loadStaticAsset: () => {
+        loads++;
+        return photo;
+      },
+    });
+  const optimize = createOptimizer();
+  const statuses = [];
+  for (const size of [500, 500, 500, 640]) {
+    statuses.push((await request(optimize, size)).status);
+  }
+  assert.deepEqual([statuses, loads], [[400, 400, 400, 200], 1]);
+
+  const variant = (await request(createOptimizer(), 360)).body;
+  // Room for the 360 variant, but not for the original beside it.
+  const tight = createOptimizer({
+    cacheSizeMb: (photo.length + variant.length / 2) / 1024 / 1024,
+  });
+  loads = 0;
+  const warm = await request(tight, 360);
+  assert.equal((await request(tight, 500)).status, 400);
+  const revisit = await request(tight, 360);
+  assert.deepEqual([revisit.body === warm.body, loads], [true, 2]);
+});
+
 test('simultaneous requests share one read and one encode per variant', async t => {
   const jpeg = await noisyJpeg(1200, 800);
   const encodes = t.mock.method(sharp.prototype, 'toBuffer');
@@ -419,7 +488,10 @@ test('a width asked for while another encodes shares its read', async t => {
     return toBuffer.apply(this, args);
   });
   let loads = 0;
-  const optimize = createOptimizer();
+  // Too small to cache the original, so only the in-flight read can be shared.
+  const optimize = createOptimizer({
+    cacheSizeMb: photo.length / 2 / 1024 / 1024,
+  });
   const request = size =>
     optimize({
       url: `/img-optimizer?src=/photo.jpg&size=${size}`,
@@ -536,15 +608,51 @@ test('the cache stays within its bytes, evicting older originals before variants
   );
 });
 
-test('an original too big to keep beside its variant never evicts an older one', async () => {
+test('an original with no room beside cached variants evicts nothing', async () => {
   const cache = new ImageCache(100);
-  await cache.variant('x 1', '', 1, async () => ({ data: Buffer.alloc(20) }));
-  await cache.variant('y 1', '', 1, async () => ({ data: Buffer.alloc(10) }));
-  cache.setOriginal('z', { data: Buffer.alloc(80), originalWidth: 1 }, 50);
+  const encoded = size => async () => ({ data: Buffer.alloc(size) });
+  cache.setOriginal('a', { data: Buffer.alloc(40), originalWidth: 1 });
+  await cache.variant('a 1', '', 1, encoded(20));
+  await cache.variant('b 1', '', 1, encoded(30));
+  cache.setOriginal('b', { data: Buffer.alloc(60), originalWidth: 1 });
   assert.deepEqual(
-    [cache.original('z'), ['x 1', 'y 1'].map(k => cache.etag(k)), cache.bytes],
-    [undefined, ['', ''], 30]
+    [!!cache.original('a'), cache.original('b'), cache.bytes],
+    [true, undefined, 90]
   );
+
+  const [small, large] = await Promise.all([
+    noisyJpeg(900, 600),
+    noisyJpeg(1200, 800),
+  ]);
+  const sources = { '/a.jpg': small, '/b.jpg': large };
+  const thumbnail = (optimize, src, size = 360) =>
+    optimize({
+      url: `/img-optimizer?src=${src}&size=${size}`,
+      headers: { accept: 'image/webp' },
+    });
+  const measure = createOptimizer({ loadStaticAsset: src => sources[src] });
+  const [a, b] = await Promise.all(
+    ['/a.jpg', '/b.jpg'].map(async src => (await thumbnail(measure, src)).body)
+  );
+  // Room for the older original beside both thumbnails, not for the newer one.
+  const cacheBytes = small.length + a.length + b.length + 1024;
+  assert.ok(large.length + a.length + b.length > cacheBytes);
+  const loads = [];
+  const twoPhotos = createOptimizer({
+    cacheSizeMb: cacheBytes / 1024 / 1024,
+    loadStaticAsset: src => {
+      loads.push(src);
+      return sources[src];
+    },
+  });
+  for (const [src, size] of [
+    ['/a.jpg', 360],
+    ['/b.jpg', 360],
+    ['/a.jpg', 640],
+  ]) {
+    assert.equal((await thumbnail(twoPhotos, src, size)).status, 200);
+  }
+  assert.deepEqual(loads, ['/a.jpg', '/b.jpg']);
 
   const photo = await noisyJpeg(1200, 800);
   const request = (optimize, src) =>
@@ -574,11 +682,17 @@ test('an encode too big to cache keeps the original it came from', async () => {
   const cache = new ImageCache(100);
   const original = size => ({ data: Buffer.alloc(size), originalWidth: 1 });
   cache.setOriginal('a', original(40));
-  cache.setOriginal('a', original(40), 101);
-  cache.setOriginal('b', original(101), 101);
+  await cache.variant('a 1', '', 1, async () => ({ data: Buffer.alloc(101) }));
+  cache.setOriginal('a', original(40));
+  cache.setOriginal('b', original(101));
   assert.deepEqual(
-    [!!cache.original('a'), cache.original('b'), cache.bytes],
-    [true, undefined, 40]
+    [
+      !!cache.original('a'),
+      cache.etag('a 1'),
+      cache.original('b'),
+      cache.bytes,
+    ],
+    [true, undefined, undefined, 40]
   );
 
   const photo = await sharp({
@@ -719,12 +833,21 @@ test('an ETag the browser kept answers 304 without encoding, even on a cold cach
   );
   assert.deepEqual(
     answers.map(r => `${r.status} ${r.headers.ETag}`),
-    Array(7).fill('200 W/"v1-webp-640-65"')
+    [...Array(6).fill('200 W/"v1-webp-640-65"'), '304 W/"v1-webp-640-65"']
   );
   assert.deepEqual(
     store.calls.map(([, etag]) => etag),
     [undefined, undefined, undefined, 'fake', undefined, undefined, undefined]
   );
+
+  store.calls = [];
+  const repeated = await request(640, ['"other"', 'W/"v1-webp-640-65"']);
+  assert.deepEqual(
+    [repeated.status, store.calls],
+    [304, [['/photos/5/image', 'v1']]]
+  );
+  store.data = null;
+  assert.equal((await request(640, '*')).status, 404);
 });
 
 test('an etag holding a comma matches its ETag, warm or cold', async () => {

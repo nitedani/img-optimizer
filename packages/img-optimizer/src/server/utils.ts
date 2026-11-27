@@ -6,7 +6,13 @@ export const parseHeaders = (
 ): Record<string, string> => {
   const result: Record<string, string> = {};
   const add = (value: string | string[] | undefined, key: string) => {
-    result[key.toLowerCase()] = Array.isArray(value) ? value[0] : value || '';
+    const name = key.toLowerCase();
+    // Repeated If-None-Match values form one list, as Headers joins them.
+    result[name] = Array.isArray(value)
+      ? name === 'if-none-match'
+        ? value.join(', ')
+        : value[0]
+      : value || '';
   };
   if (typeof headers.forEach === 'function') {
     headers.forEach(add);
