@@ -314,7 +314,8 @@ export function createOptimizer(
         `${originalKey}:${format}:${size}:${qualityKey}`,
         '',
         quality,
-        sizeImage
+        sizeImage,
+        originalKey
       );
     } catch (error) {
       if (!(error instanceof SizeError)) {

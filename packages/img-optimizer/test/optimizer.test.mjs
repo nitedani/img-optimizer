@@ -325,6 +325,32 @@ test('a second width of an image reuses the original read for the first', async 
   assert.equal(loads, 1);
 });
 
+test('a new photo reuses its original across widths once variants fill the cache', async () => {
+  const [filler, photo] = await Promise.all([
+    noisyJpeg(1200, 800),
+    noisyJpeg(1200, 800),
+  ]);
+  let loads = 0;
+  const optimize = createOptimizer({ cacheSizeMb: 1 });
+  const request = (src, size) =>
+    optimize({
+      url: `/img-optimizer?src=${src}&size=${size}`,
+      headers: { accept: 'image/webp' },
+      loadStaticAsset: () => {
+        if (src !== '/photo.jpg') return filler;
+        loads++;
+        return photo;
+      },
+    });
+  for (let i = 0; i < 12; i++) {
+    assert.equal((await request(`/filler-${i}.jpg`, 640)).status, 200);
+  }
+  for (const size of [1024, 640, 360]) {
+    assert.equal((await request('/photo.jpg', size)).status, 200);
+  }
+  assert.equal(loads, 1);
+});
+
 test('simultaneous requests share one read and one encode per variant', async t => {
   const jpeg = await noisyJpeg(1200, 800);
   const encodes = t.mock.method(sharp.prototype, 'toBuffer');
@@ -433,6 +459,28 @@ test('the cache stays within its bytes and evicts originals before variants', as
     })
   );
   assert.equal(cache.cachedVersion('g 1'), undefined);
+});
+
+test('the cache keeps the original being encoded from, never past its bytes', async () => {
+  const cache = new ImageCache(100);
+  const bytes = () => cache.variantBytes + cache.originalBytes;
+  const encoded = size => async () => ({ data: Buffer.alloc(size) });
+  await cache.variant('x 1', '', 1, encoded(70));
+  cache.setOriginal('a', {
+    version: '',
+    data: Buffer.alloc(40),
+    originalWidth: 1,
+  });
+  await cache.variant('a 1', '', 1, encoded(50), 'a');
+  assert.deepEqual(
+    [!!cache.original('a', ''), cache.cachedVersion('x 1'), bytes()],
+    [true, undefined, 90]
+  );
+  await cache.variant('a 2', '', 1, encoded(70), 'a');
+  assert.deepEqual(
+    [cache.original('a', ''), cache.cachedVersion('a 2'), bytes()],
+    [undefined, '', 70]
+  );
 });
 
 test('load serves the image at the pathname, given as an option or per call', async () => {

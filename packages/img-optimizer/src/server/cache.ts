@@ -21,7 +21,8 @@ const touch = <T>(map: Map<string, T>, key: string, value: T) => {
 
 /**
  * Encoded variants and the originals they are encoded from, least recently
- * used first, sharing one byte budget; originals are evicted before variants.
+ * used first, sharing one byte budget; originals are evicted before variants,
+ * except the one just stored or encoded from.
  */
 export class ImageCache {
   variantBytes = 0;
@@ -45,7 +46,8 @@ export class ImageCache {
     key: string,
     version: string,
     quality: number,
-    encode: () => Promise<EncodedVariant>
+    encode: () => Promise<EncodedVariant>,
+    keepOriginal?: string
   ) {
     const cached = this.variants.get(key);
     if (cached?.version === version) {
@@ -68,7 +70,7 @@ export class ImageCache {
         variant.bytes = bytes;
         this.variantBytes += bytes;
         touch(this.variants, key, variant);
-        this.trim();
+        this.trim(keepOriginal, key);
       },
       () => {
         if (this.variants.get(key) === variant) {
@@ -95,7 +97,7 @@ export class ImageCache {
     }
     this.originals.set(key, original);
     this.originalBytes += original.data.length;
-    this.trim();
+    this.trim(key);
   }
 
   private deleteVariant(key: string) {
@@ -108,20 +110,28 @@ export class ImageCache {
     this.originals.delete(key);
   }
 
-  private trim() {
+  private trim(keepOriginal?: string, keepVariant?: string) {
     for (const key of this.originals.keys()) {
       if (this.variantBytes + this.originalBytes <= this.maxBytes) {
         return;
       }
-      this.deleteOriginal(key);
+      if (key !== keepOriginal) {
+        this.deleteOriginal(key);
+      }
     }
     for (const [key, variant] of this.variants) {
       if (this.variantBytes + this.originalBytes <= this.maxBytes) {
         return;
       }
-      if (variant.bytes !== undefined) {
+      if (key !== keepVariant && variant.bytes !== undefined) {
         this.deleteVariant(key);
       }
+    }
+    if (
+      keepOriginal &&
+      this.variantBytes + this.originalBytes > this.maxBytes
+    ) {
+      this.deleteOriginal(keepOriginal);
     }
   }
 }
