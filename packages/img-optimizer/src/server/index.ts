@@ -15,16 +15,16 @@ import {
 } from './types.js';
 
 export function createOptimizer(
-  optimizerOptions: OptimizerOptions & { load: ImageLoader }
+  options: OptimizerOptions & { load: ImageLoader }
 ): (input: OptimizerInput) => Promise<PrivateOptimizerResult>;
 export function createOptimizer<T extends OptimizerOptions>(
-  optimizerOptions: T & LoadMayBeGiven<T>
+  options: T & LoadMayBeGiven<T>
 ): (input: OptimizerInput) => Promise<OptimizerResult | PrivateOptimizerResult>;
 export function createOptimizer(
-  optimizerOptions?: OptimizerOptions & { load?: undefined }
+  options?: OptimizerOptions & { load?: undefined }
 ): Optimize;
-export function createOptimizer(optimizerOptions?: OptimizerOptions) {
-  const _optimizerOptions = defu(optimizerOptions, {
+export function createOptimizer(options?: OptimizerOptions) {
+  const config = defu(options, {
     sizes: [360, 640, 1024, 1280, 1600, 1920, 2560, 3840],
     cacheSizeMb: 50,
     formats: [
@@ -40,22 +40,20 @@ export function createOptimizer(optimizerOptions?: OptimizerOptions) {
     domains: ['localhost'],
   });
 
-  const cache = new ImageCache(_optimizerOptions.cacheSizeMb * 1024 * 1024);
-  const optimizePublic = publicOptimizer(_optimizerOptions, cache);
-  const optimizePrivate = privateOptimizer(_optimizerOptions, cache);
+  const cache = new ImageCache(config.cacheSizeMb * 1024 * 1024);
+  const optimizePublic = publicOptimizer(config, cache);
+  const optimizePrivate = privateOptimizer(config, cache);
 
   // A request with a `load` is the app's own; any other is a public `?src=` one.
-  return async (optimizeOptions: OptimizerInput) => {
-    const headers = optimizeOptions.headers
-      ? parseHeaders(optimizeOptions.headers)
-      : {};
-    const load = optimizeOptions.load ?? _optimizerOptions.load;
+  return async (input: OptimizerInput) => {
+    const headers = input.headers ? parseHeaders(input.headers) : {};
+    const load = input.load ?? config.load;
     return load
-      ? optimizePrivate(optimizeOptions.url, headers, load)
+      ? optimizePrivate(input.url, headers, load)
       : optimizePublic(
-          optimizeOptions.url,
+          input.url,
           headers,
-          optimizeOptions.loadStaticAsset ?? _optimizerOptions.loadStaticAsset
+          input.loadStaticAsset ?? config.loadStaticAsset
         );
   };
 }
