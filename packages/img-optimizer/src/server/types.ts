@@ -1,3 +1,21 @@
+export type ImageBytes = Buffer | ArrayBuffer | Uint8Array;
+
+export interface LoadedImage {
+  /** Changes whenever the image does, e.g. its S3 ETag without the quotes. */
+  etag: string;
+  /** Left out when `etag` is still current. */
+  data?: ImageBytes;
+}
+
+/**
+ * `etag` is the source ETag from the cache or the browser's If-None-Match;
+ * `null` answers 404.
+ */
+export type ImageLoader = (
+  src: string,
+  etag?: string
+) => LoadedImage | null | Promise<LoadedImage | null>;
+
 export type StaticAssetLoader = (
   src: string
 ) => Buffer | ArrayBuffer | Promise<Buffer | ArrayBuffer>;
@@ -11,7 +29,11 @@ export interface OptimizerOptions {
   formats?: Format[];
   cacheSizeMb?: number;
   sizes?: number[];
+  /** `?quality=` values cached apart; other values share one cached copy. */
+  qualities?: readonly number[];
   domains?: string[] | true;
+  /** Reads the image at the request's pathname, for a route the app guards. */
+  load?: ImageLoader;
 }
 
 export interface OptimizerResult {
@@ -24,4 +46,42 @@ export interface OptimizerInput {
   url: string | URL;
   headers?: Record<string, string | string[] | undefined> | Headers;
   loadStaticAsset?: StaticAssetLoader;
+  load?: ImageLoader;
 }
+
+export interface PublicOptimizerInput extends OptimizerInput {
+  load?: undefined;
+}
+
+export interface PrivateOptimizerInput extends OptimizerInput {
+  load: ImageLoader;
+}
+
+export interface PrivateOptimizerResult {
+  /** null on a 304; treat returned Buffers as read-only. */
+  body: Buffer | string | null;
+  headers: Record<string, string>;
+  status: number;
+}
+
+// never for an argument without a loader, which the public overload takes.
+export type LoadMayBeGiven<T> = T extends { load?: infer Load }
+  ? [Load] extends [undefined]
+    ? never
+    : unknown
+  : never;
+
+/** `optimize` of an optimizer made without `load`: each call's `load` decides. */
+export interface Optimize {
+  (input: PrivateOptimizerInput): Promise<PrivateOptimizerResult>;
+  <T extends OptimizerInput>(input: T & LoadMayBeGiven<T>): Promise<
+    OptimizerResult | PrivateOptimizerResult
+  >;
+  (input: PublicOptimizerInput): Promise<OptimizerResult>;
+}
+
+/** The options with their defaults filled in. */
+export type Config = OptimizerOptions &
+  Required<
+    Pick<OptimizerOptions, 'sizes' | 'cacheSizeMb' | 'formats' | 'domains'>
+  >;

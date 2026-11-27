@@ -12,7 +12,8 @@
     "url": "https://github.com/nitedani/img-optimizer"
   },
   "scripts": {
-    "build": "rimraf lib && tsc -b"
+    "build": "rimraf lib && tsc -b",
+    "test": "node --test test/*.test.mjs"
   },
   "exports": {
     ".": "./lib/index.js",

@@ -1,31 +1,6 @@
 import { StaticAssetLoader } from './types.js';
 import got from 'got';
 
-export const parseHeaders = (
-  headers: Record<string, string | string[] | undefined> | Headers
-): Record<string, string> => {
-  const result: Record<string, string> = {};
-  if (typeof headers.forEach === 'function') {
-    headers.forEach((value, key) => {
-      if (Array.isArray(value)) {
-        result[key] = value[0];
-      } else {
-        result[key] = value || '';
-      }
-    });
-  } else {
-    for (const [key, value] of Object.entries(headers)) {
-      if (Array.isArray(value)) {
-        result[key] = value[0];
-      } else {
-        result[key] = value || '';
-      }
-    }
-  }
-
-  return result;
-};
-
 export const loadBuffer = async ({
   src,
   headers,
@@ -58,12 +33,7 @@ export const loadBuffer = async ({
       );
     }
 
-    const bufferOrArrayBuffer = await loadStaticAsset(src);
-    if (bufferOrArrayBuffer instanceof ArrayBuffer) {
-      return Buffer.from(bufferOrArrayBuffer);
-    } else {
-      return bufferOrArrayBuffer;
-    }
+    return loadStaticAsset(src);
   }
 
   const res = await got(src);
