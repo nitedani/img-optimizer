@@ -228,15 +228,19 @@ test('a redirect keeps the quality asked for, even with another cached', async (
       headers: { accept: 'image/webp' },
       loadStaticAsset: () => jpeg,
     });
-  const optimize = createOptimizer();
+  const optimize = createOptimizer({ qualities: [30] });
   const warm = await request(optimize, '/photos/a?src=/photo.jpg&size=1200');
-  const redirect = await request(
-    optimize,
-    '/photos/a?src=/photo.jpg&size=1600&quality=30'
+  const [redirect, unlisted] = await Promise.all(
+    [30, 70].map(quality =>
+      request(optimize, `/photos/a?src=/photo.jpg&size=1600&quality=${quality}`)
+    )
   );
-  assert.equal(
-    redirect.headers.Location,
-    '/photos/a?src=%2Fphoto.jpg&size=1200&quality=30'
+  assert.deepEqual(
+    [redirect.headers.Location, unlisted.headers.Location],
+    [
+      '/photos/a?src=%2Fphoto.jpg&size=1200&quality=30',
+      '/photos/a?src=%2Fphoto.jpg&size=1200&quality=70',
+    ]
   );
   const followed = await request(optimize, redirect.headers.Location);
   const direct = await request(
@@ -1002,7 +1006,7 @@ test('a public ?src= of the same path and load never share a cache entry', async
   assert.equal(publicLoads, 1);
 });
 
-test('unlisted qualities share one cached copy, listed ones get their own', async t => {
+test('unlisted and omitted qualities share one cached copy, listed ones get their own', async t => {
   const jpeg = await noisyJpeg(1200, 800);
   const encodes = t.mock.method(sharp.prototype, 'toBuffer');
   const request = (optimize, query) =>
@@ -1012,38 +1016,58 @@ test('unlisted qualities share one cached copy, listed ones get their own', asyn
       loadStaticAsset: () => jpeg,
     });
   const optimize = createOptimizer();
-  const sixty = await request(optimize, '&quality=60');
+  const eighty = await request(optimize, '&quality=80');
+  const omitted = await request(optimize, '');
   const sweep = await Promise.all(
     Array.from({ length: 100 }, (_, i) =>
       request(optimize, `&quality=${i + 1}`)
     )
   );
-  assert.ok(sweep.every(r => r.body === sixty.body));
-  const [omitted, empty, ...invalid] = await Promise.all(
-    ['', '&quality=', '&quality=0', '&quality=101', '&quality=abc'].map(query =>
+  assert.ok(sweep.every(r => r.body === eighty.body));
+  const [empty, ...invalid] = await Promise.all(
+    ['&quality=', '&quality=0', '&quality=101', '&quality=abc'].map(query =>
       request(optimize, query)
     )
   );
-  assert.equal(empty.body, omitted.body);
+  assert.deepEqual(
+    [omitted.body === eighty.body, empty.body === eighty.body],
+    [true, true]
+  );
   assert.deepEqual(
     invalid.map(r => r.status),
     [400, 400, 400]
   );
-  assert.equal(encodes.mock.callCount(), 2);
+  assert.equal(encodes.mock.callCount(), 1);
 
-  const listed = createOptimizer({ qualities: [60, 85] });
-  const [sixtyListed, eightyFive, seventySeven, seventyEight] =
-    await Promise.all(
-      ['60', '85', '77', '78'].map(q => request(listed, `&quality=${q}`))
-    );
-  assert.equal(encodes.mock.callCount(), 5);
-  assert.deepEqual(sixtyListed.body, sixty.body);
-  assert.notDeepEqual(eightyFive.body, sixty.body);
-  assert.equal(seventyEight.body, seventySeven.body);
-  assert.deepEqual(
-    seventySeven.body,
-    (await request(createOptimizer(), '&quality=77')).body
+  const listed = createOptimizer({ qualities: [60, 80] });
+  const seventy = await request(listed, '&quality=70');
+  const [sixty, eightyListed, omittedListed] = await Promise.all(
+    ['&quality=60', '&quality=80', ''].map(query => request(listed, query))
   );
+  const freshSeventy = await request(createOptimizer(), '&quality=70');
+  assert.deepEqual(
+    [
+      omittedListed.body === seventy.body,
+      eightyListed.body.equals(eighty.body),
+      sixty.body.equals(seventy.body),
+      seventy.body.equals(freshSeventy.body),
+    ],
+    [true, true, false, true]
+  );
+  assert.equal(encodes.mock.callCount(), 5);
+
+  const withDefault = createOptimizer({ qualities: [65, 80] });
+  const unlisted = await request(withDefault, '&quality=70');
+  const omittedDefault = await request(withDefault, '');
+  const sixtyFive = await request(withDefault, '&quality=65');
+  assert.deepEqual(
+    [
+      omittedDefault.body.equals(unlisted.body),
+      omittedDefault.body === sixtyFive.body,
+    ],
+    [false, true]
+  );
+  assert.equal(encodes.mock.callCount(), 7);
 });
 
 test("a load answer's ETag names the quality it was encoded at", async () => {

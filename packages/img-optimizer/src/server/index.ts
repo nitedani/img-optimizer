@@ -154,26 +154,25 @@ export function createOptimizer(
     return pending;
   };
 
-  // Unlisted qualities share one slot, so a ?quality= sweep can't fill the cache.
+  // Omitted and unlisted qualities share a slot, bounding a ?quality= sweep.
   const pickEncoding = (
     headers: Record<string, string>,
     requestedQuality: string | null
   ) => {
     const accept = headers['accept'] ?? 'webp';
-    const { format, quality } =
+    const { format, quality: defaultQuality } =
       _optimizerOptions.formats.find(f => accept.includes(f.format)) ||
       _optimizerOptions.formats[0];
-    if (!requestedQuality) {
-      return { format, quality, qualityKey: 'default' };
-    }
-    const requested = parseInt(requestedQuality, 10);
-    if (!(requested >= 1 && requested <= 100)) {
+    const quality = requestedQuality
+      ? parseInt(requestedQuality, 10)
+      : defaultQuality;
+    if (!(quality >= 1 && quality <= 100)) {
       return null;
     }
-    const qualityKey = _optimizerOptions.qualities?.includes(requested)
-      ? String(requested)
-      : 'unlisted';
-    return { format, quality: requested, qualityKey };
+    const qualityKey = _optimizerOptions.qualities?.includes(quality)
+      ? String(quality)
+      : 'default';
+    return { format, quality, qualityKey };
   };
 
   const optimizePrivate = async (
@@ -372,7 +371,7 @@ export function createOptimizer(
         Location:
           `${pathname.replace(/^\/+/, '/')}?src=${encodeURIComponent(src)}` +
           `&size=${image.redirectTo}` +
-          (qualityKey === 'default' ? '' : `&quality=${quality}`),
+          (requestedQuality ? `&quality=${quality}` : ''),
       },
       body: '',
     };
