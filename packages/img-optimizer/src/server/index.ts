@@ -1,6 +1,6 @@
 import { defu } from 'defu';
 import { EncodedVariant, ImageCache, Original } from './cache.js';
-import { encode, readWidth } from './encode.js';
+import { openImage } from './image.js';
 import {
   OptimizerOptions,
   Format,
@@ -241,7 +241,7 @@ export function createOptimizer(
       return { status: 304, body: null, headers: answerHeaders };
     }
     const image = await cache.variant(key, etag, quality, async () => ({
-      data: await encode(data!, format, quality, size),
+      data: await openImage(data!).encode(format, size, quality),
     }));
     return {
       status: 200,
@@ -301,14 +301,17 @@ export function createOptimizer(
 
     const originalKey = JSON.stringify(['public', src]);
     const readOriginal = async (): Promise<Original> => {
-      const data = await loadBuffer({
-        src,
-        headers,
-        loadStaticAsset:
-          optimizeOptions.loadStaticAsset ?? _optimizerOptions.loadStaticAsset,
-        port,
-      });
-      return { data, originalWidth: await readWidth(data) };
+      const image = openImage(
+        await loadBuffer({
+          src,
+          headers,
+          loadStaticAsset:
+            optimizeOptions.loadStaticAsset ??
+            _optimizerOptions.loadStaticAsset,
+          port,
+        })
+      );
+      return { image, width: await image.width() };
     };
     let loadedOriginal: Original | undefined;
     let ownsRead = false;
@@ -320,16 +323,15 @@ export function createOptimizer(
         inFlightLoads.set(originalKey, readOriginal());
       }
       original ??= await (inFlightLoads.get(originalKey) as Promise<Original>);
-      const { originalWidth } = original;
-      if (size !== originalWidth && !_optimizerOptions.sizes.includes(size)) {
+      if (size !== original.width && !_optimizerOptions.sizes.includes(size)) {
         cache.setOriginal(originalKey, original);
         throw new SizeError();
       }
       loadedOriginal = original;
-      if (size > originalWidth) {
-        return { redirectTo: originalWidth };
+      if (size > original.width) {
+        return { redirectTo: original.width };
       }
-      return { data: await encode(original.data, format, quality, size) };
+      return { data: await original.image.encode(format, size, quality) };
     };
 
     let image: EncodedVariant;

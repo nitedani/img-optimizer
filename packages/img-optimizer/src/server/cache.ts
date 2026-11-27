@@ -1,8 +1,10 @@
+import { Image } from './image.js';
+
 export type EncodedVariant = { data: Buffer } | { redirectTo: number };
 
 export interface Original {
-  data: Buffer;
-  originalWidth: number;
+  image: Image;
+  width: number;
 }
 
 interface Variant {
@@ -97,11 +99,11 @@ export class ImageCache {
 
   setOriginal(key: string, original: Original) {
     this.deleteOriginal(key);
-    if (this.variantBytes + original.data.length > this.maxBytes) {
+    if (this.variantBytes + original.image.bytes > this.maxBytes) {
       return;
     }
     this.originals.set(key, original);
-    this.bytes += original.data.length;
+    this.bytes += original.image.bytes;
     for (const other of this.originals.keys()) {
       if (this.bytes <= this.maxBytes) {
         return;
@@ -120,7 +122,7 @@ export class ImageCache {
   }
 
   private deleteOriginal(key: string) {
-    this.bytes -= this.originals.get(key)?.data.length ?? 0;
+    this.bytes -= this.originals.get(key)?.image.bytes ?? 0;
     this.originals.delete(key);
   }
 

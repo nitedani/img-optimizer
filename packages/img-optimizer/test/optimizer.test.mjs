@@ -547,7 +547,7 @@ test('a gallery larger than cacheSizeMb keeps every thumbnail and drops original
 test('the cache stays within its bytes, evicting older originals before variants', async () => {
   const cache = new ImageCache(100);
   const encoded = size => async () => ({ data: Buffer.alloc(size) });
-  const original = size => ({ data: Buffer.alloc(size), originalWidth: 1 });
+  const original = size => ({ image: { bytes: size }, width: 1 });
   cache.setOriginal('a', original(40));
   await cache.variant('a 1', '', 1, encoded(20));
   cache.setOriginal('b', original(40));
@@ -611,10 +611,10 @@ test('the cache stays within its bytes, evicting older originals before variants
 test('an original with no room beside cached variants evicts nothing', async () => {
   const cache = new ImageCache(100);
   const encoded = size => async () => ({ data: Buffer.alloc(size) });
-  cache.setOriginal('a', { data: Buffer.alloc(40), originalWidth: 1 });
+  cache.setOriginal('a', { image: { bytes: 40 }, width: 1 });
   await cache.variant('a 1', '', 1, encoded(20));
   await cache.variant('b 1', '', 1, encoded(30));
-  cache.setOriginal('b', { data: Buffer.alloc(60), originalWidth: 1 });
+  cache.setOriginal('b', { image: { bytes: 60 }, width: 1 });
   assert.deepEqual(
     [!!cache.original('a'), cache.original('b'), cache.bytes],
     [true, undefined, 90]
@@ -680,7 +680,7 @@ test('an original with no room beside cached variants evicts nothing', async () 
 
 test('an encode too big to cache keeps the original it came from', async () => {
   const cache = new ImageCache(100);
-  const original = size => ({ data: Buffer.alloc(size), originalWidth: 1 });
+  const original = size => ({ image: { bytes: size }, width: 1 });
   cache.setOriginal('a', original(40));
   await cache.variant('a 1', '', 1, async () => ({ data: Buffer.alloc(101) }));
   cache.setOriginal('a', original(40));
