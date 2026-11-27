@@ -29,6 +29,8 @@ export interface OptimizerOptions {
   formats?: Format[];
   cacheSizeMb?: number;
   sizes?: readonly number[];
+  /** `?quality=` values cached apart; other values share one cached copy. */
+  qualities?: readonly number[];
   domains?: string[] | true;
 }
 

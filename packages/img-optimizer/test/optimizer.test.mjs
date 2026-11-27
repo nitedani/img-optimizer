@@ -647,6 +647,60 @@ test('a public ?src= of the same path and load never share a cache entry', async
   assert.equal(publicLoads, 1);
 });
 
+test('unlisted qualities share one cached copy, listed ones get their own', async t => {
+  const jpeg = await noisyJpeg(1200, 800);
+  const encodes = t.mock.method(sharp.prototype, 'toBuffer');
+  const request = (optimize, query) =>
+    optimize({
+      url: `/img-optimizer?src=/photo.jpg&size=640${query}`,
+      headers: { accept: 'image/webp' },
+      loadStaticAsset: () => jpeg,
+    });
+  const optimize = createOptimizer();
+  const sixty = await request(optimize, '&quality=60');
+  const sweep = await Promise.all(
+    Array.from({ length: 100 }, (_, i) =>
+      request(optimize, `&quality=${i + 1}`)
+    )
+  );
+  assert.ok(sweep.every(r => r.body === sixty.body));
+  const defaults = await Promise.all(
+    ['', '&quality=0', '&quality=101', '&quality=abc', '&quality=60.5'].map(
+      query => request(optimize, query)
+    )
+  );
+  assert.ok(defaults.every(r => r.body === defaults[0].body));
+  assert.equal(encodes.mock.callCount(), 2);
+
+  const listed = createOptimizer({ qualities: [60, 85] });
+  const [sixtyListed, eightyFive, seventySeven, seventyEight] =
+    await Promise.all(
+      ['60', '85', '77', '78'].map(q => request(listed, `&quality=${q}`))
+    );
+  assert.equal(encodes.mock.callCount(), 5);
+  assert.deepEqual(sixtyListed.body, sixty.body);
+  assert.notDeepEqual(eightyFive.body, sixty.body);
+  assert.equal(seventyEight.body, seventySeven.body);
+  assert.deepEqual(
+    seventySeven.body,
+    (await request(createOptimizer(), '&quality=77')).body
+  );
+});
+
+test("a load answer's ETag names the quality it was encoded at", async () => {
+  const store = await photoStore();
+  const optimize = createOptimizer({ load: store.load });
+  const etags = [];
+  for (const quality of [60, 77]) {
+    const { headers } = await optimize({
+      url: `/photos/5/image?size=640&quality=${quality}`,
+      headers: { accept: 'image/webp' },
+    });
+    etags.push(headers.ETag);
+  }
+  assert.deepEqual(etags, ['W/"v1-webp-640-60"', 'W/"v1-webp-640-60"']);
+});
+
 test('the types keep 0.0.4 callers unchanged and give load a nullable body', async () => {
   const tsc = new URL('../node_modules/.bin/tsc', import.meta.url).pathname;
   const types = new URL('./types.ts', import.meta.url).pathname;

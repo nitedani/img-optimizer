@@ -74,7 +74,7 @@ const parseRequest = (url: string | URL, headers: Record<string, string>) => {
     port,
     src,
     size: sizeStr ? parseInt(sizeStr, 10) : undefined,
-    quality: qualityStr ? parseInt(qualityStr, 10) : undefined,
+    quality: qualityStr,
   };
 };
 
@@ -139,12 +139,27 @@ export function createOptimizer(
     return pending;
   };
 
-  const pickFormat = (headers: Record<string, string>) => {
+  // Unlisted qualities share one slot, so a ?quality= sweep can't fill the cache.
+  const pickEncoding = (
+    headers: Record<string, string>,
+    requestedQuality: string | null
+  ) => {
     const accept = headers['accept'] ?? 'webp';
-    return (
+    const { format, quality } =
       _optimizerOptions.formats.find(f => accept.includes(f.format)) ||
-      _optimizerOptions.formats[0]
-    );
+      _optimizerOptions.formats[0];
+    const requested = Number(requestedQuality);
+    if (
+      !/^\d+$/.test(requestedQuality ?? '') ||
+      requested < 1 ||
+      requested > 100
+    ) {
+      return { format, quality, qualityKey: 'default' };
+    }
+    const qualityKey = _optimizerOptions.qualities?.includes(requested)
+      ? String(requested)
+      : 'unlisted';
+    return { format, quality: requested, qualityKey };
   };
 
   const optimizePrivate = async (
@@ -158,11 +173,12 @@ export function createOptimizer(
     if (!/^\d+$/.test(sizeStr) || !_optimizerOptions.sizes.includes(size)) {
       return textAnswer(400, 'Bad request');
     }
-    const { format, quality: defaultQuality } = pickFormat(headers);
-    const qualityStr = searchParams.get('quality');
-    const quality = qualityStr ? parseInt(qualityStr, 10) : defaultQuality;
+    const { format, quality, qualityKey } = pickEncoding(
+      headers,
+      searchParams.get('quality')
+    );
 
-    const key = `private:${src}:${format}:${size}:${quality}`;
+    const key = `private:${src}:${format}:${size}:${qualityKey}`;
     const ifNoneMatch = headers['if-none-match'];
     const read = (held?: string) =>
       readOnce(`private:${src}:${held ?? ''}`, async () => load(src, held));
@@ -255,9 +271,10 @@ export function createOptimizer(
       }
     }
 
-    const { format, quality: defaultQuality } = pickFormat(headers);
-
-    const quality = requestedQuality ?? defaultQuality;
+    const { format, quality, qualityKey } = pickEncoding(
+      headers,
+      requestedQuality
+    );
 
     const originalKey = `public:${src}`;
     const readOriginal = async (): Promise<Original> => {
@@ -292,7 +309,7 @@ export function createOptimizer(
     let image: EncodedVariant;
     try {
       image = await cache.variant(
-        `${originalKey}:${format}:${size}:${quality}`,
+        `${originalKey}:${format}:${size}:${qualityKey}`,
         '',
         quality,
         sizeImage
@@ -323,7 +340,7 @@ export function createOptimizer(
         Location:
           `${pathname}?src=${encodeURIComponent(src)}` +
           `&size=${image.redirectTo}` +
-          (requestedQuality ? `&quality=${requestedQuality}` : ''),
+          (qualityKey === 'default' ? '' : `&quality=${quality}`),
       },
       body: '',
     };

@@ -93,6 +93,7 @@ This library requires the Sharp native dependecies to be present at runtime. The
 createOptimizer options:
 - <b>cacheSizeMb?: number</b><br> img-optimizer caches the compressed images and the originals they are made from. This option sets the upper limit of the cache size in megabytes; originals are dropped first.
 - <b>sizes?: number[]</b><br> img-optimizer can be restricted to only serve specific sizes(width). If the size is not allowed, a 400 bad response will be returned. default: [360, 640, 1024, 1280, 1600, 1920, 2560, 3840]
+- <b>qualities?: number[]</b><br> `?quality=` values (1-100) that get their own cached copy of an image. Other values share one copy per image, size and format, encoded at the first of them asked for. Without `?quality=`, the format's quality is used.
 - <b>formats?: Format[]</b><br> default: [
       {
         format: 'avif',
