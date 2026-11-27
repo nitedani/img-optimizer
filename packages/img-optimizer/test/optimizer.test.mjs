@@ -366,6 +366,37 @@ test('simultaneous requests share one read and one encode per variant', async t 
   assert.equal(encodes.mock.callCount(), 2);
 });
 
+test('a width asked for while another encodes shares its read', async t => {
+  const photo = await noisyJpeg(1200, 800);
+  const toBuffer = sharp.prototype.toBuffer;
+  let encodeStarted;
+  const encoding = new Promise(resolve => (encodeStarted = resolve));
+  t.mock.method(sharp.prototype, 'toBuffer', function (...args) {
+    encodeStarted();
+    return toBuffer.apply(this, args);
+  });
+  let loads = 0;
+  const optimize = createOptimizer();
+  const request = size =>
+    optimize({
+      url: `/img-optimizer?src=/photo.jpg&size=${size}`,
+      headers: { accept: 'image/webp' },
+      loadStaticAsset: () => {
+        loads++;
+        return photo;
+      },
+    });
+  const first = request(1024);
+  await encoding;
+  assert.equal((await request(500)).status, 400);
+  const answers = await Promise.all([first, request(640)]);
+  assert.deepEqual(
+    answers.map(r => r.status),
+    [200, 200]
+  );
+  assert.equal(loads, 1);
+});
+
 test('a gallery larger than cacheSizeMb keeps every thumbnail and drops originals', async t => {
   const photos = await Promise.all(
     Array.from({ length: 24 }, () => noisyJpeg(1000, 700))
@@ -459,6 +490,40 @@ test('the cache stays within its bytes, evicting older originals before variants
     ],
     [undefined, ['', '', ''], 80]
   );
+});
+
+test('an original too big to keep beside its variant never evicts an older one', async () => {
+  const cache = new ImageCache(100);
+  await cache.variant('x 1', '', 1, async () => ({ data: Buffer.alloc(20) }));
+  await cache.variant('y 1', '', 1, async () => ({ data: Buffer.alloc(10) }));
+  cache.setOriginal('z', { data: Buffer.alloc(80), originalWidth: 1 }, 50);
+  assert.deepEqual(
+    [cache.original('z'), ['x 1', 'y 1'].map(k => cache.etag(k)), cache.bytes],
+    [undefined, ['', ''], 30]
+  );
+
+  const photo = await noisyJpeg(1200, 800);
+  const request = (optimize, src) =>
+    optimize({
+      url: `/img-optimizer?src=${src}&size=360`,
+      headers: { accept: 'image/webp' },
+    });
+  const variant = (
+    await request(createOptimizer({ loadStaticAsset: () => photo }), '/a.jpg')
+  ).body;
+  const reads = [];
+  // Room for both variants or for one original, never for an original and its variant.
+  const optimize = createOptimizer({
+    cacheSizeMb: (photo.length + variant.length / 2) / 1024 / 1024,
+    loadStaticAsset: src => {
+      reads.push(src);
+      return photo;
+    },
+  });
+  for (const src of ['/a.jpg', '/b.jpg', '/a.jpg']) {
+    assert.equal((await request(optimize, src)).status, 200);
+  }
+  assert.deepEqual(reads, ['/a.jpg', '/b.jpg']);
 });
 
 test('load serves the image at the pathname, given as an option or per call', async () => {
@@ -787,6 +852,34 @@ test('a colon in the path or etag never shares a read with another pair', async 
     ['/a:b', 'c'],
     ['/a', 'b:c'],
   ]);
+});
+
+test('an empty source etag never shares a read with a load that has none', async () => {
+  const data = await solidJpeg(1200, 800, 'blue');
+  let failConditional;
+  const conditional = new Promise((_, reject) => (failConditional = reject));
+  const calls = [];
+  const optimize = createOptimizer({
+    load: async (src, etag) => {
+      calls.push(etag);
+      return etag === '' ? conditional : { etag: '', data };
+    },
+  });
+  const request = (size, ifNoneMatch) =>
+    optimize({
+      url: `/photo?size=${size}`,
+      headers: { accept: 'image/webp', 'if-none-match': ifNoneMatch },
+    });
+  const warm = await request(360);
+  const answers = Promise.allSettled([
+    request(360, warm.headers.ETag),
+    request(640),
+  ]);
+  failConditional(new Error('conditional request failed'));
+  const [conditionalAnswer, coldAnswer] = await answers;
+  assert.equal(conditionalAnswer.status, 'rejected');
+  assert.equal(coldAnswer.value?.status, 200);
+  assert.deepEqual(calls, [undefined, '', undefined]);
 });
 
 test('a public ?src= of the same path and load never share a cache entry', async () => {

@@ -95,9 +95,9 @@ export class ImageCache {
     return original;
   }
 
-  setOriginal(key: string, original: Original) {
+  setOriginal(key: string, original: Original, reserveBytes = 0) {
     this.deleteOriginal(key);
-    if (original.data.length > this.maxBytes) {
+    if (original.data.length + reserveBytes > this.maxBytes) {
       return;
     }
     this.originals.set(key, original);

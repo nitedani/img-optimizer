@@ -205,7 +205,7 @@ export function createOptimizer(
       .map(tag => tag.slice(1, -suffix.length))
       .find(etag => /^[^*\x00-\x1f\x7f]+$/.test(etag));
     const read = (etag?: string) =>
-      readOnce(JSON.stringify(['private', src, etag ?? '']), async () =>
+      readOnce(JSON.stringify(['private', src, etag ?? null]), async () =>
         load(src, etag)
       );
     let loaded = await read(cache.etag(key) ?? browserEtag);
@@ -308,24 +308,34 @@ export function createOptimizer(
           optimizeOptions.loadStaticAsset ?? _optimizerOptions.loadStaticAsset,
         port,
       });
-      const original = {
-        data,
-        originalWidth: await readWidth(data),
-      };
-      cache.setOriginal(originalKey, original);
-      return original;
+      return { data, originalWidth: await readWidth(data) };
     };
     const sizeImage = async (): Promise<EncodedVariant> => {
-      const { data, originalWidth } =
-        cache.original(originalKey) ??
-        (await readOnce(originalKey, readOriginal));
-      if (size !== originalWidth && !_optimizerOptions.sizes.includes(size)) {
-        throw new SizeError();
+      let original = cache.original(originalKey);
+      // Other widths share this read until its owner's encode settles.
+      const ownsRead = !original && !inFlightLoads.has(originalKey);
+      if (ownsRead) {
+        inFlightLoads.set(originalKey, readOriginal());
       }
-      if (size > originalWidth) {
-        return { redirectTo: originalWidth };
+      const reading = inFlightLoads.get(originalKey) as Promise<Original>;
+      try {
+        original ??= await reading;
+        const { originalWidth } = original;
+        if (size !== originalWidth && !_optimizerOptions.sizes.includes(size)) {
+          throw new SizeError();
+        }
+        if (size > originalWidth) {
+          cache.setOriginal(originalKey, original, 64);
+          return { redirectTo: originalWidth };
+        }
+        const data = await encode(original.data, format, quality, size);
+        cache.setOriginal(originalKey, original, data.length);
+        return { data };
+      } finally {
+        if (ownsRead) {
+          inFlightLoads.delete(originalKey);
+        }
       }
-      return { data: await encode(data, format, quality, size) };
     };
 
     let image: EncodedVariant;
