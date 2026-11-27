@@ -49,21 +49,24 @@ export class ImageCache {
     return variant?.etag === etag ? variant.quality : undefined;
   }
 
-  variant(
+  /** Resolves once the variant is counted and the cache trimmed to its bytes. */
+  variant<T extends EncodedVariant>(
     key: string,
     etag: string,
     quality: number,
-    encode: () => Promise<EncodedVariant>
+    encode: () => Promise<T>
   ) {
     const cached = this.variants.get(key);
     if (cached?.etag === etag) {
       touch(this.variants, key, cached);
-      return cached.image;
+      // A key only ever holds what its own lane encodes.
+      return cached.image as Promise<T>;
     }
     this.deleteVariant(key);
-    const variant: Variant = { etag, quality, image: encode() };
+    const image = encode();
+    const variant: Variant = { etag, quality, image };
     this.variants.set(key, variant);
-    variant.image.then(
+    image.then(
       image => {
         if (this.variants.get(key) !== variant) {
           return;
@@ -86,7 +89,7 @@ export class ImageCache {
         }
       }
     );
-    return variant.image;
+    return image;
   }
 
   original(key: string) {

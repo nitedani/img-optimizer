@@ -104,7 +104,7 @@ export const privateOptimizer = (config: Config, cache: ImageCache) => {
     }));
     return {
       status: 200,
-      body: (image as { data: Buffer }).data,
+      body: image.data,
       headers: {
         ...answerHeaders,
         'Content-Type': `image/${format}`,

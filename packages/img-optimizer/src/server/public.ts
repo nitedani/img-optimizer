@@ -94,7 +94,7 @@ export const publicOptimizer = (config: Config, cache: ImageCache) => {
         quality,
         sizeImage
       );
-      // Admitted after variant() trims, into the space the variants leave.
+      // Kept in the space the variants leave, so only once this one is counted.
       if (loadedOriginal) {
         cache.setOriginal(originalKey, loadedOriginal);
       }
