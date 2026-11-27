@@ -81,7 +81,7 @@ export class ImageCache {
         this.bytes += bytes;
         this.variantBytes += bytes;
         touch(this.variants, key, variant);
-        this.trim(key);
+        this.trim();
       },
       () => {
         if (this.variants.get(key) === variant) {
@@ -111,9 +111,7 @@ export class ImageCache {
       if (this.bytes <= this.maxBytes) {
         return;
       }
-      if (other !== key) {
-        this.deleteOriginal(other);
-      }
+      this.deleteOriginal(other);
     }
   }
 
@@ -129,7 +127,7 @@ export class ImageCache {
     this.originals.delete(key);
   }
 
-  private trim(keepVariant: string) {
+  private trim() {
     for (const key of this.originals.keys()) {
       if (this.bytes <= this.maxBytes) {
         return;
@@ -140,7 +138,7 @@ export class ImageCache {
       if (this.bytes <= this.maxBytes) {
         return;
       }
-      if (key !== keepVariant && variant.bytes !== undefined) {
+      if (variant.bytes !== undefined) {
         this.deleteVariant(key);
       }
     }
