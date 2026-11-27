@@ -4,6 +4,11 @@ import { loadBuffer } from './loadBuffer.js';
 import { parseRequest, pickEncoding } from './request.js';
 import { Config, OptimizerResult, StaticAssetLoader } from './types.js';
 
+/** An original with its upright width, which each requested width meets. */
+interface SizedOriginal extends Original {
+  width: number;
+}
+
 /** A width that is neither in `sizes` nor the image's own. */
 class SizeError extends Error {}
 
@@ -18,7 +23,7 @@ const badRequest = (body = 'Bad request'): OptimizerResult => ({
  * kept by browsers for good, or a redirect to its own width when narrower.
  */
 export const publicOptimizer = (config: Config, cache: ImageCache) => {
-  const inFlightReads = new Map<string, Promise<Original>>();
+  const inFlightReads = new Map<string, Promise<SizedOriginal>>();
 
   return async (
     requestUrl: string | URL,
@@ -58,17 +63,17 @@ export const publicOptimizer = (config: Config, cache: ImageCache) => {
     const { format, quality, qualityKey } = encoding;
 
     const originalKey = JSON.stringify(['public', src]);
-    const readOriginal = async (): Promise<Original> => {
+    const readOriginal = async (): Promise<SizedOriginal> => {
       const image = openImage(
         await loadBuffer({ src, headers, loadStaticAsset, port })
       );
       return { image, width: await image.width() };
     };
-    let loadedOriginal: Original | undefined;
+    let loadedOriginal: SizedOriginal | undefined;
     let ownsRead = false;
     // Runs when the variant is not cached: a cached one needs no original.
     const sizeImage = async (): Promise<EncodedVariant> => {
-      let original = cache.original(originalKey);
+      let original = cache.original<SizedOriginal>(originalKey);
       // Other widths share this read until the request that started it settles.
       ownsRead = !original && !inFlightReads.has(originalKey);
       if (ownsRead) {

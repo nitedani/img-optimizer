@@ -1,13 +1,15 @@
 import { ImageCache } from './cache.js';
 import { browserEtag, browserHas, variantTag } from './etag.js';
-import { openImage } from './image.js';
+import { Image, openImage } from './image.js';
 import { parseUrl, pickEncoding } from './request.js';
-import {
-  Config,
-  ImageLoader,
-  LoadedImage,
-  PrivateOptimizerResult,
-} from './types.js';
+import { Config, ImageLoader, PrivateOptimizerResult } from './types.js';
+
+/** What load answered for a source, its data opened once for every width. */
+interface Source {
+  etag: string;
+  /** Unset when load answered without data. */
+  image?: Image;
+}
 
 const textAnswer = (status: number, body: string) => ({
   status,
@@ -24,15 +26,21 @@ const textAnswer = (status: number, body: string) => ({
  * reads at its pathname: private to the browser, revalidated by ETag.
  */
 export const privateOptimizer = (config: Config, cache: ImageCache) => {
-  const inFlightLoads = new Map<string, Promise<LoadedImage | null>>();
-  // Concurrent misses for the same source and etag share one load.
+  const inFlightLoads = new Map<string, Promise<Source | null>>();
+  // Concurrent misses for the same source and etag share one load and image.
   const loadOnce = (load: ImageLoader, src: string, etag?: string) => {
     const key = JSON.stringify([src, etag ?? null]);
     let pending = inFlightLoads.get(key);
     if (!pending) {
-      pending = (async () => load(src, etag))().finally(() =>
-        inFlightLoads.delete(key)
-      );
+      pending = (async () => {
+        const loaded = await load(src, etag);
+        return (
+          loaded && {
+            etag: loaded.etag,
+            image: loaded.data && openImage(loaded.data),
+          }
+        );
+      })().finally(() => inFlightLoads.delete(key));
       inFlightLoads.set(key, pending);
     }
     return pending;
@@ -63,29 +71,40 @@ export const privateOptimizer = (config: Config, cache: ImageCache) => {
     const tagOf = (etag: string) =>
       variantTag(etag, format, size, cache.quality(key, etag) ?? quality);
 
+    const originalKey = JSON.stringify(['private', src]);
+    const original = cache.original<Required<Source>>(originalKey);
+    const notFound = () => {
+      cache.deleteOriginal(originalKey);
+      return textAnswer(404, 'Not found');
+    };
+
     // An etag the cache or the browser holds lets load answer without the data.
-    let loaded = await loadOnce(
+    let source = await loadOnce(
       load,
       src,
-      cache.etag(key) ?? browserEtag(ifNoneMatch, format, size, quality)
+      cache.etag(key) ??
+        original?.etag ??
+        browserEtag(ifNoneMatch, format, size, quality)
     );
-    if (!loaded) {
-      return textAnswer(404, 'Not found');
+    if (!source) {
+      return notFound();
     }
+    let image = original?.etag === source.etag ? original.image : source.image;
     if (
-      loaded.data === undefined &&
-      cache.etag(key) !== loaded.etag &&
-      !browserHas(ifNoneMatch, tagOf(loaded.etag))
+      !image &&
+      cache.etag(key) !== source.etag &&
+      !browserHas(ifNoneMatch, tagOf(source.etag))
     ) {
-      loaded = await loadOnce(load, src);
-      if (!loaded) {
-        return textAnswer(404, 'Not found');
+      source = await loadOnce(load, src);
+      if (!source) {
+        return notFound();
       }
-      if (loaded.data === undefined) {
+      if (!source.image) {
         throw new Error(`load returned no data for ${src}`);
       }
+      image = source.image;
     }
-    const { etag, data } = loaded;
+    const { etag } = source;
     const answerHeaders: Record<string, string> = {
       ETag: `W/${tagOf(etag)}`,
       'Cache-Control':
@@ -98,13 +117,17 @@ export const privateOptimizer = (config: Config, cache: ImageCache) => {
       cache.touchVariant(key, etag);
       return { status: 304, body: null, headers: answerHeaders };
     }
-    // Without data the variant is cached still: nothing awaited since the check.
-    const image = await cache.variant(key, etag, quality, async () => ({
-      data: await openImage(data!).encode(format, size, quality),
+    // With no image the variant is cached still: nothing awaited since the check.
+    const variant = await cache.variant(key, etag, quality, async () => ({
+      data: await image!.encode(format, size, quality),
     }));
+    // Kept in the space the variants leave, so only once this one is counted.
+    if (image) {
+      cache.setOriginal(originalKey, { image, etag });
+    }
     return {
       status: 200,
-      body: image.data,
+      body: variant.data,
       headers: {
         ...answerHeaders,
         'Content-Type': `image/${format}`,

@@ -2,9 +2,9 @@ import { Image } from './image.js';
 
 export type EncodedVariant = { data: Buffer } | { redirectTo: number };
 
+/** A source kept to encode its other variants; each lane adds what it checks. */
 export interface Original {
   image: Image;
-  width: number;
 }
 
 interface Variant {
@@ -92,15 +92,16 @@ export class ImageCache {
     return image;
   }
 
-  original(key: string) {
+  original<T extends Original>(key: string) {
     const original = this.originals.get(key);
     if (original) {
       touch(this.originals, key, original);
     }
-    return original;
+    // A key only ever holds what its own lane keeps.
+    return original as T | undefined;
   }
 
-  setOriginal(key: string, original: Original) {
+  setOriginal<T extends Original>(key: string, original: T) {
     this.deleteOriginal(key);
     if (this.variantBytes + original.image.bytes > this.maxBytes) {
       return;
@@ -122,7 +123,7 @@ export class ImageCache {
     this.variants.delete(key);
   }
 
-  private deleteOriginal(key: string) {
+  deleteOriginal(key: string) {
     this.bytes -= this.originals.get(key)?.image.bytes ?? 0;
     this.originals.delete(key);
   }

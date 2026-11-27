@@ -214,6 +214,122 @@ test('a variant evicted while load checked it is read again', async () => {
   );
 });
 
+test('a photo is read and opened once for all its widths and formats', async t => {
+  const store = await photoStore();
+  const opens = t.mock.method(sharp.prototype, 'rotate');
+  const request = (optimize, size, accept = 'image/webp') =>
+    optimize({ url: `/photos/5/image?size=${size}`, headers: { accept } });
+  const optimize = createOptimizer({ load: store.load });
+  const answers = [];
+  for (const [size, accept] of [
+    [360, 'image/webp'],
+    [640, 'image/webp'],
+    [1024, 'image/avif'],
+  ]) {
+    answers.push(await request(optimize, size, accept));
+  }
+  const decoded = await Promise.all(
+    answers.map(async ({ status, body }) => {
+      const { width, format } = await sharp(body).metadata();
+      return [status, width, format];
+    })
+  );
+  assert.deepEqual(decoded, [
+    [200, 360, 'webp'],
+    [200, 640, 'webp'],
+    [200, 1024, 'heif'],
+  ]);
+  assert.deepEqual(
+    store.calls.map(([, etag]) => etag),
+    [undefined, 'v1', 'v1']
+  );
+  assert.equal(opens.mock.callCount(), 1);
+
+  store.calls = [];
+  opens.mock.resetCalls();
+  const fresh = createOptimizer({ load: store.load });
+  const simultaneous = await Promise.all(
+    [360, 640].map(size => request(fresh, size))
+  );
+  assert.deepEqual(
+    simultaneous.map(r => r.status),
+    [200, 200]
+  );
+  assert.deepEqual(store.calls, [['/photos/5/image', undefined]]);
+  assert.equal(opens.mock.callCount(), 1);
+});
+
+test('a replaced or deleted photo never answers from its cached original', async () => {
+  const store = await photoStore();
+  const optimize = createOptimizer({ load: store.load });
+  const color = async size => {
+    const { status, body } = await optimize({
+      url: `/photos/5/image?size=${size}`,
+      headers: { accept: 'image/webp' },
+    });
+    if (status !== 200) return status;
+    const pixel = (await sharp(body).raw().toBuffer()).subarray(0, 3);
+    return [...pixel].map(channel => (channel < 128 ? 0 : 255));
+  };
+  assert.deepEqual(await color(360), [0, 0, 255]);
+  store.etag = 'v2';
+  store.data = await solidJpeg(1200, 800, 'red');
+  assert.deepEqual(await color(640), [255, 0, 0]);
+  assert.deepEqual(await color(1024), [255, 0, 0]);
+  store.data = null;
+  assert.equal(await color(1280), 404);
+  // A photo made again may reuse an etag, as a row version starting over does.
+  store.data = await solidJpeg(1200, 800, 'lime');
+  assert.deepEqual(await color(1600), [0, 255, 0]);
+  assert.deepEqual(
+    store.calls.map(([, etag]) => etag),
+    [undefined, 'v1', 'v2', 'v2', undefined]
+  );
+});
+
+test('a private original with no room beside warm thumbnails evicts none', async () => {
+  const [large, ...thumbnails] = await Promise.all([
+    noisyJpeg(1600, 1100),
+    ...Array.from({ length: 4 }, () => noisyJpeg(450, 300)),
+  ]);
+  const photos = [...thumbnails, large];
+  const calls = photos.map(() => []);
+  const load = (src, etag) => {
+    const i = src.match(/\d+/)[0];
+    calls[i].push(etag);
+    return etag === 'v1' ? { etag } : { etag: 'v1', data: photos[i] };
+  };
+  const request = (optimize, i, size = 360) =>
+    optimize({
+      url: `/photos/${i}/image?size=${size}`,
+      headers: { accept: 'image/webp' },
+    });
+  const measure = createOptimizer({ load });
+  const variants = [];
+  for (const i of photos.keys()) {
+    variants.push((await request(measure, i)).body.length);
+  }
+  // Room for the large original beside its own variant, not beside all five.
+  const cacheBytes = large.length + variants[4] + Math.min(...variants) / 2;
+  calls.forEach(etags => etags.splice(0));
+  const optimize = createOptimizer({
+    cacheSizeMb: cacheBytes / 1024 / 1024,
+    load,
+  });
+  for (const i of photos.keys()) {
+    assert.equal((await request(optimize, i)).status, 200);
+  }
+  const revisits = await Promise.all(
+    [0, 1, 2, 3].map(i => request(optimize, i))
+  );
+  assert.ok(revisits.every(r => r.status === 200));
+  assert.equal((await request(optimize, 4, 640)).status, 200);
+  assert.deepEqual(calls, [
+    ...Array(4).fill([undefined, 'v1']),
+    [undefined, undefined],
+  ]);
+});
+
 test('load answers a narrower image at its own width, never redirecting', async () => {
   const narrow = await solidJpeg(500, 300, 'blue');
   const { status, body } = await createOptimizer()({
@@ -347,6 +463,8 @@ test('an empty source etag never shares a read with a load that has none', async
   const conditional = new Promise((_, reject) => (failConditional = reject));
   const calls = [];
   const optimize = createOptimizer({
+    // Room for the variant, not its original, so the cold width loads with no etag.
+    cacheSizeMb: data.length / 2 / 1024 / 1024,
     load: async (src, etag) => {
       calls.push(etag);
       return etag === '' ? conditional : { etag: '', data };
