@@ -274,6 +274,29 @@ test('a redirect keeps an src that has its own query', async () => {
   assert.equal(location.searchParams.get('size'), '1200');
 });
 
+test('a redirect counts against cacheSizeMb, so 0 keeps none', async () => {
+  const narrow = await noisyJpeg(500, 300);
+  for (const [cacheSizeMb, expectedLoads] of [
+    [0, 2],
+    [1 / 1024, 1],
+  ]) {
+    let loads = 0;
+    const optimize = createOptimizer({ cacheSizeMb });
+    for (let i = 0; i < 2; i++) {
+      const { status } = await optimize({
+        url: '/img-optimizer?src=/narrow.jpg&size=640',
+        headers: { accept: 'image/webp' },
+        loadStaticAsset: () => {
+          loads++;
+          return narrow;
+        },
+      });
+      assert.equal(status, 302);
+    }
+    assert.equal(loads, expectedLoads, `cacheSizeMb: ${cacheSizeMb}`);
+  }
+});
+
 test('a failed load is not kept, so the next request loads again', async t => {
   t.mock.method(console, 'error', () => {});
   const jpeg = await sharp({
@@ -408,50 +431,42 @@ test('a gallery larger than cacheSizeMb keeps every thumbnail and drops original
   assert.equal(loads, 25);
 });
 
-test('the cache stays within its bytes and evicts originals before variants', async () => {
+test('the cache stays within its bytes, evicting older originals before variants', async () => {
   const cache = new ImageCache(100);
-  const bytes = () => cache.variantBytes + cache.originalBytes;
   const encoded = size => async () => ({ data: Buffer.alloc(size) });
-  const original = size => ({
-    version: '',
-    data: Buffer.alloc(size),
-    originalWidth: 1,
-  });
+  const original = size => ({ data: Buffer.alloc(size), originalWidth: 1 });
   cache.setOriginal('a', original(40));
   await cache.variant('a 1', '', 1, encoded(20));
   cache.setOriginal('b', original(40));
   await cache.variant('b 1', '', 1, encoded(20));
   assert.deepEqual(
-    [cache.original('a', ''), !!cache.original('b', ''), bytes()],
+    [cache.original('a'), !!cache.original('b'), cache.bytes],
     [undefined, true, 80]
   );
   await cache.variant('c 1', '', 1, encoded(30));
   await cache.variant('d 1', '', 1, encoded(30));
   assert.deepEqual(
     [
-      cache.original('b', ''),
+      cache.original('b'),
       ['a 1', 'b 1', 'c 1', 'd 1'].map(k => cache.cachedVersion(k)),
-      bytes(),
+      cache.bytes,
     ],
     [undefined, ['', '', '', ''], 100]
   );
   await cache.variant('e 1', '', 1, encoded(30));
   assert.deepEqual(
-    ['a 1', 'b 1', 'c 1', 'e 1'].map(k => cache.cachedVersion(k)),
-    [undefined, undefined, '', '']
+    [
+      ['a 1', 'b 1', 'c 1', 'e 1'].map(k => cache.cachedVersion(k)),
+      cache.bytes,
+    ],
+    [[undefined, undefined, '', ''], 90]
   );
-  assert.equal(bytes(), 90);
   const oversized = await cache.variant('f 1', '', 1, encoded(101));
   assert.equal(oversized.data.length, 101);
   cache.setOriginal('f', original(101));
   assert.deepEqual(
-    [
-      cache.cachedVersion('f 1'),
-      cache.original('f', ''),
-      cache.cachedVersion('e 1'),
-      bytes(),
-    ],
-    [undefined, undefined, '', 90]
+    [cache.cachedVersion('f 1'), cache.original('f'), cache.bytes],
+    [undefined, undefined, 90]
   );
   await assert.rejects(
     cache.variant('g 1', '', 1, async () => {
@@ -459,26 +474,16 @@ test('the cache stays within its bytes and evicts originals before variants', as
     })
   );
   assert.equal(cache.cachedVersion('g 1'), undefined);
-});
 
-test('the cache keeps the original being encoded from, never past its bytes', async () => {
-  const cache = new ImageCache(100);
-  const bytes = () => cache.variantBytes + cache.originalBytes;
-  const encoded = size => async () => ({ data: Buffer.alloc(size) });
-  await cache.variant('x 1', '', 1, encoded(70));
-  cache.setOriginal('a', {
-    version: '',
-    data: Buffer.alloc(40),
-    originalWidth: 1,
-  });
-  await cache.variant('a 1', '', 1, encoded(50), 'a');
+  cache.setOriginal('h', original(40));
+  await cache.variant('h 1', '', 1, encoded(20), 'h');
   assert.deepEqual(
-    [!!cache.original('a', ''), cache.cachedVersion('x 1'), bytes()],
+    [!!cache.original('h'), cache.cachedVersion('d 1'), cache.bytes],
     [true, undefined, 90]
   );
-  await cache.variant('a 2', '', 1, encoded(70), 'a');
+  await cache.variant('h 2', '', 1, encoded(70), 'h');
   assert.deepEqual(
-    [cache.original('a', ''), cache.cachedVersion('a 2'), bytes()],
+    [cache.original('h'), cache.cachedVersion('h 2'), cache.bytes],
     [undefined, '', 70]
   );
 });

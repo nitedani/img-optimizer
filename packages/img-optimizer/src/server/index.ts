@@ -288,7 +288,6 @@ export function createOptimizer(
         port,
       });
       const original = {
-        version: '',
         data,
         originalWidth: await readWidth(data),
       };
@@ -297,7 +296,7 @@ export function createOptimizer(
     };
     const sizeImage = async (): Promise<EncodedVariant> => {
       const { data, originalWidth } =
-        cache.original(originalKey, '') ??
+        cache.original(originalKey) ??
         (await readOnce(`${originalKey}:`, readOriginal));
       if (size !== originalWidth && !_optimizerOptions.sizes.includes(size)) {
         throw new SizeError();

@@ -1,7 +1,6 @@
 export type EncodedVariant = { data: Buffer } | { redirectTo: number };
 
 export interface Original {
-  version: string;
   data: Buffer;
   originalWidth: number;
 }
@@ -25,8 +24,7 @@ const touch = <T>(map: Map<string, T>, key: string, value: T) => {
  * except the one just stored or encoded from.
  */
 export class ImageCache {
-  variantBytes = 0;
-  originalBytes = 0;
+  bytes = 0;
   private variants = new Map<string, Variant>();
   private originals = new Map<string, Original>();
 
@@ -41,7 +39,6 @@ export class ImageCache {
     return variant?.version === version ? variant.quality : undefined;
   }
 
-  /** The variant cached under `key` at `version`, encoded with `encode` on a miss. */
   variant(
     key: string,
     version: string,
@@ -62,13 +59,14 @@ export class ImageCache {
         if (this.variants.get(key) !== variant) {
           return;
         }
-        const bytes = 'data' in image ? image.data.length : 0;
+        // A redirect still holds memory, so a zero budget keeps none.
+        const bytes = 'data' in image ? image.data.length : 64;
         if (bytes > this.maxBytes) {
           this.variants.delete(key);
           return;
         }
         variant.bytes = bytes;
-        this.variantBytes += bytes;
+        this.bytes += bytes;
         touch(this.variants, key, variant);
         this.trim(keepOriginal, key);
       },
@@ -81,12 +79,11 @@ export class ImageCache {
     return variant.image;
   }
 
-  original(key: string, version: string) {
+  original(key: string) {
     const original = this.originals.get(key);
-    if (original?.version !== version) {
-      return undefined;
+    if (original) {
+      touch(this.originals, key, original);
     }
-    touch(this.originals, key, original);
     return original;
   }
 
@@ -96,23 +93,23 @@ export class ImageCache {
       return;
     }
     this.originals.set(key, original);
-    this.originalBytes += original.data.length;
+    this.bytes += original.data.length;
     this.trim(key);
   }
 
   private deleteVariant(key: string) {
-    this.variantBytes -= this.variants.get(key)?.bytes ?? 0;
+    this.bytes -= this.variants.get(key)?.bytes ?? 0;
     this.variants.delete(key);
   }
 
   private deleteOriginal(key: string) {
-    this.originalBytes -= this.originals.get(key)?.data.length ?? 0;
+    this.bytes -= this.originals.get(key)?.data.length ?? 0;
     this.originals.delete(key);
   }
 
   private trim(keepOriginal?: string, keepVariant?: string) {
     for (const key of this.originals.keys()) {
-      if (this.variantBytes + this.originalBytes <= this.maxBytes) {
+      if (this.bytes <= this.maxBytes) {
         return;
       }
       if (key !== keepOriginal) {
@@ -120,17 +117,14 @@ export class ImageCache {
       }
     }
     for (const [key, variant] of this.variants) {
-      if (this.variantBytes + this.originalBytes <= this.maxBytes) {
+      if (this.bytes <= this.maxBytes) {
         return;
       }
       if (key !== keepVariant && variant.bytes !== undefined) {
         this.deleteVariant(key);
       }
     }
-    if (
-      keepOriginal &&
-      this.variantBytes + this.originalBytes > this.maxBytes
-    ) {
+    if (keepOriginal && this.bytes > this.maxBytes) {
       this.deleteOriginal(keepOriginal);
     }
   }
