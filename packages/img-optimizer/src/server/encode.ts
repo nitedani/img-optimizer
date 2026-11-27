@@ -1,8 +1,10 @@
 import sharp from 'sharp';
 import { Format, ImageBytes } from './types.js';
 
-export const readWidth = async (data: Buffer) =>
-  (await sharp(data).metadata()).autoOrient.width;
+export const readWidth = async (data: Buffer) => {
+  const { width, height, orientation } = await sharp(data).metadata();
+  return orientation && orientation >= 5 ? height! : width!;
+};
 
 export const encode = (
   data: ImageBytes,
@@ -10,8 +12,8 @@ export const encode = (
   quality: number,
   width: number
 ) =>
-  sharp(data)
-    .autoOrient()
+  sharp(data instanceof ArrayBuffer ? Buffer.from(data) : data)
+    .rotate()
     .resize({ width, withoutEnlargement: true })
     [format]({ quality })
     .toBuffer();
