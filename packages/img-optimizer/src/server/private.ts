@@ -79,20 +79,15 @@ export const privateOptimizer = (config: Config, cache: ImageCache) => {
       return source;
     };
 
-    const notFound = () => {
-      cache.deleteOriginal(originalKey);
-      return textAnswer(404, 'Not found');
-    };
-
     try {
       // An etag the cache or the browser holds lets load answer without the data.
       let source = await loadOnce(
-        cache.etag(key) ??
-          original?.etag ??
+        original?.etag ??
+          cache.etag(key) ??
           browserEtag(ifNoneMatch, format, size, quality)
       );
       if (!source) {
-        return notFound();
+        return textAnswer(404, 'Not found');
       }
       let image =
         original?.etag === source.etag ? original.image : source.image;
@@ -103,7 +98,7 @@ export const privateOptimizer = (config: Config, cache: ImageCache) => {
       ) {
         source = await loadOnce();
         if (!source) {
-          return notFound();
+          return textAnswer(404, 'Not found');
         }
         if (!source.image) {
           throw new Error(`load returned no data for ${src}`);
@@ -121,6 +116,10 @@ export const privateOptimizer = (config: Config, cache: ImageCache) => {
       };
       if (browserHas(ifNoneMatch, tagOf(etag))) {
         cache.touchVariant(key, etag);
+        // Replaces a stale original, so the next revalidation passes this etag.
+        if (image) {
+          cache.setOriginal(originalKey, { image, etag });
+        }
         return { status: 304, body: null, headers: answerHeaders };
       }
       // With no image the variant is cached still: nothing awaited since the check.

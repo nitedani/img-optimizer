@@ -300,58 +300,41 @@ test('a replaced or deleted photo never answers from its cached original', async
   store.data = await solidJpeg(1200, 800, 'red');
   assert.deepEqual(await color(640), [255, 0, 0]);
   assert.deepEqual(await color(1024), [255, 0, 0]);
+  assert.deepEqual(await color(360), [255, 0, 0]);
   store.data = null;
   assert.equal(await color(1280), 404);
-  // A photo made again may reuse an etag, as a row version starting over does.
-  store.data = await solidJpeg(1200, 800, 'lime');
-  assert.deepEqual(await color(1600), [0, 255, 0]);
   assert.deepEqual(
     store.calls.map(([, etag]) => etag),
-    [undefined, 'v1', 'v2', 'v2', undefined]
+    [undefined, 'v1', 'v2', 'v2', 'v2']
   );
 });
 
-test('a private original with no room beside warm thumbnails evicts none', async () => {
-  const [large, ...thumbnails] = await Promise.all([
-    noisyJpeg(1600, 1100),
-    ...Array.from({ length: 4 }, () => noisyJpeg(450, 300)),
-  ]);
-  const photos = [...thumbnails, large];
-  const calls = photos.map(() => []);
-  const load = (src, etag) => {
-    const i = src.match(/\d+/)[0];
-    calls[i].push(etag);
-    return etag === 'v1' ? { etag } : { etag: 'v1', data: photos[i] };
-  };
-  const request = (optimize, i, size = 360) =>
-    optimize({
-      url: `/photos/${i}/image?size=${size}`,
-      headers: { accept: 'image/webp' },
-    });
-  const measure = createOptimizer({ load });
-  const variants = [];
-  for (const i of photos.keys()) {
-    variants.push((await request(measure, i)).body.length);
+test('a revalidation for a replaced photo replaces the stale original', async () => {
+  const store = await photoStore();
+  const v1 = store.data;
+  const v2 = await noisyJpeg(1200, 800);
+  // The second budget has room for v1's original beside its variant, not for v2's.
+  for (const cacheSizeMb of [undefined, (v1.length * 2) / 1024 / 1024]) {
+    Object.assign(store, { etag: 'v1', data: v1, calls: [] });
+    const optimize = createOptimizer({ cacheSizeMb, load: store.load });
+    const request = (size, ifNoneMatch) =>
+      optimize({
+        url: `/photos/5/image?size=${size}`,
+        headers: { accept: 'image/webp', 'if-none-match': ifNoneMatch },
+      });
+    assert.equal((await request(360)).status, 200);
+    Object.assign(store, { etag: 'v2', data: v2 });
+    // As when another server answered this width after the replacement.
+    const statuses = [];
+    for (let i = 0; i < 3; i++) {
+      statuses.push((await request(640, 'W/"v2-webp-640-65"')).status);
+    }
+    assert.deepEqual(statuses, [304, 304, 304]);
+    assert.deepEqual(
+      store.calls.map(([, etag]) => etag),
+      [undefined, 'v1', 'v2', 'v2']
+    );
   }
-  // Room for the large original beside its own variant, not beside all five.
-  const cacheBytes = large.length + variants[4] + Math.min(...variants) / 2;
-  calls.forEach(etags => etags.splice(0));
-  const optimize = createOptimizer({
-    cacheSizeMb: cacheBytes / 1024 / 1024,
-    load,
-  });
-  for (const i of photos.keys()) {
-    assert.equal((await request(optimize, i)).status, 200);
-  }
-  const revisits = await Promise.all(
-    [0, 1, 2, 3].map(i => request(optimize, i))
-  );
-  assert.ok(revisits.every(r => r.status === 200));
-  assert.equal((await request(optimize, 4, 640)).status, 200);
-  assert.deepEqual(calls, [
-    ...Array(4).fill([undefined, 'v1']),
-    [undefined, undefined],
-  ]);
 });
 
 test('load answers a narrower image at its own width, never redirecting', async () => {

@@ -144,7 +144,7 @@ export class ImageCache {
     this.variants.delete(key);
   }
 
-  deleteOriginal(key: string) {
+  private deleteOriginal(key: string) {
     this.bytes -= this.originals.get(key)?.image.bytes ?? 0;
     this.originals.delete(key);
   }
