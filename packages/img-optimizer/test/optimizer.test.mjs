@@ -885,7 +885,7 @@ test('a failing load or encode rejects and is not kept', async () => {
   assert.equal(loads, 3);
 });
 
-test('private routes mounted at different paths serve their own images', async () => {
+test('distinct pathnames on one optimizer serve their own images', async () => {
   const routes = [
     ['/items/5/image', await solidJpeg(1200, 800, 'blue')],
     ['/partners/5/image', await solidJpeg(1200, 800, 'red')],
